@@ -592,14 +592,21 @@ async def instagram_callback(
                     return RedirectResponse(url=redirect_url)
 
             # Check if this Instagram account is already connected to ANOTHER workspace
+            # Check by both platform_user_id AND username (Instagram Business Login uses different IDs)
+            from sqlalchemy import or_
             existing_other_workspace = (
                 db.query(ConnectedAccount)
                 .filter(
                     ConnectedAccount.platform == "instagram",
-                    ConnectedAccount.platform_user_id == instagram_account_id,
                     ConnectedAccount.is_active == True,
                     ConnectedAccount.workspace_id.isnot(None),
                     ConnectedAccount.workspace_id != workspace_id,
+                )
+                .filter(
+                    or_(
+                        ConnectedAccount.platform_user_id == instagram_account_id,
+                        ConnectedAccount.platform_username == ig_account.get("username"),
+                    )
                 )
                 .first()
             )
@@ -611,13 +618,19 @@ async def instagram_callback(
                 redirect_url = f"{settings.FRONTEND_URL}/dashboard?error=instagram_in_use&message={error_msg}"
                 return RedirectResponse(url=redirect_url)
 
-            # Check if account already exists for this user (check by Instagram Account ID)
+            # Check if account already exists for this user IN THIS WORKSPACE
             existing_account = (
                 db.query(ConnectedAccount)
                 .filter(
                     ConnectedAccount.user_id == user.id,
                     ConnectedAccount.platform == "instagram",
-                    ConnectedAccount.platform_user_id == instagram_account_id,
+                    ConnectedAccount.workspace_id == workspace_id,
+                )
+                .filter(
+                    or_(
+                        ConnectedAccount.platform_user_id == instagram_account_id,
+                        ConnectedAccount.platform_username == ig_account.get("username"),
+                    )
                 )
                 .first()
             )
