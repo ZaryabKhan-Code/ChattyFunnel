@@ -12,7 +12,17 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://roamifly-admin-b97e9
 const getProxiedProfilePic = (url: string | undefined): string | undefined => {
   if (!url) return undefined
   // Only proxy Instagram/Facebook CDN URLs that tend to expire
-  if (url.includes('cdninstagram.com') || url.includes('fbcdn.net') || url.includes('xx.fbcdn.net')) {
+  if (url.includes('cdninstagram.com') || url.includes('fbcdn.net') || url.includes('scontent')) {
+    return `${API_URL}/media/profile-pic?url=${encodeURIComponent(url)}`
+  }
+  return url
+}
+
+// Proxy media attachments (images, videos, audio) through backend
+const getProxiedMediaUrl = (url: string | undefined): string | undefined => {
+  if (!url) return undefined
+  // Proxy Instagram/Facebook CDN URLs that tend to expire
+  if (url.includes('cdninstagram.com') || url.includes('fbcdn.net') || url.includes('scontent')) {
     return `${API_URL}/media/profile-pic?url=${encodeURIComponent(url)}`
   }
   return url
@@ -315,9 +325,9 @@ export default function Messages() {
                           {/* Image Attachment */}
                           {msg.attachment_url && (msg.message_type === 'image' || msg.attachment_type?.startsWith('image/')) && (
                             <div className="relative">
-                              <a href={msg.attachment_url} target="_blank" rel="noopener noreferrer">
+                              <a href={getProxiedMediaUrl(msg.attachment_url)} target="_blank" rel="noopener noreferrer">
                                 <img
-                                  src={msg.attachment_url}
+                                  src={getProxiedMediaUrl(msg.attachment_url)}
                                   alt="Image attachment"
                                   className="max-w-full max-h-64 object-contain cursor-pointer hover:opacity-90"
                                   onError={(e) => {
@@ -346,7 +356,7 @@ export default function Messages() {
                           {/* Video Attachment */}
                           {msg.attachment_url && (msg.message_type === 'video' || msg.attachment_type?.startsWith('video/')) && (
                             <video
-                              src={msg.attachment_url}
+                              src={getProxiedMediaUrl(msg.attachment_url)}
                               controls
                               className="max-w-full max-h-64"
                               preload="metadata"
@@ -363,7 +373,7 @@ export default function Messages() {
                                 <span className="text-xs font-medium">Voice Message</span>
                               </div>
                               <audio
-                                src={msg.attachment_url}
+                                src={getProxiedMediaUrl(msg.attachment_url)}
                                 controls
                                 className="w-full h-8"
                                 preload="metadata"
@@ -377,7 +387,7 @@ export default function Messages() {
                           {msg.attachment_url && msg.message_type === 'file' && !msg.attachment_type?.startsWith('image/') && !msg.attachment_type?.startsWith('video/') && !msg.attachment_type?.startsWith('audio/') && (
                             <div className="px-4 py-2">
                               <a
-                                href={msg.attachment_url}
+                                href={getProxiedMediaUrl(msg.attachment_url)}
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 className={`flex items-center gap-2 ${msg.direction === 'outgoing' ? 'text-blue-100 hover:text-white' : 'text-blue-600 hover:text-blue-800'}`}
