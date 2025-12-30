@@ -303,13 +303,11 @@ async def facebook_callback(
                             existing_workspace_instagram.updated_at = datetime.utcnow()
                             logger.info(f"Instagram account @{ig_username} already connected via {existing_workspace_instagram.connection_type}")
                         else:
-                            # Different Instagram account - redirect with error (one Instagram per workspace)
+                            # Different Instagram account - skip adding it (one Instagram per workspace)
+                            # For Facebook page connections, we just skip the linked Instagram, not fail the whole connection
                             logger.warning(f"Workspace {workspace_id} already has Instagram @{existing_workspace_instagram.platform_username}")
-                            logger.warning(f"Cannot add Facebook page-linked Instagram @{ig_username} (one Instagram per workspace)")
-                            from app.config import settings
-                            error_msg = f"This workspace already has Instagram @{existing_workspace_instagram.platform_username} connected. Disconnect it first to connect a different account."
-                            redirect_url = f"{settings.FRONTEND_URL}/dashboard?error=instagram_conflict&message={error_msg}"
-                            return RedirectResponse(url=redirect_url)
+                            logger.warning(f"Skipping Facebook page-linked Instagram @{ig_username} (one Instagram per workspace)")
+                            logger.info(f"Facebook page {page['name']} will still be connected, just without the linked Instagram")
                         continue  # Skip to next page
 
                     # Check if this Instagram account is already connected to ANOTHER workspace
@@ -326,11 +324,11 @@ async def facebook_callback(
                     )
 
                     if existing_other_workspace_ig:
+                        # Instagram already in another workspace - skip it for Facebook page connections
                         logger.warning(f"Instagram account @{ig_username} is already connected to workspace {existing_other_workspace_ig.workspace_id}")
-                        from app.config import settings
-                        error_msg = f"Instagram @{ig_username} is already connected to another workspace. Each Instagram account can only be in one workspace."
-                        redirect_url = f"{settings.FRONTEND_URL}/dashboard?error=instagram_in_use&message={error_msg}"
-                        return RedirectResponse(url=redirect_url)
+                        logger.warning(f"Skipping Facebook page-linked Instagram @{ig_username} (already in another workspace)")
+                        logger.info(f"Facebook page {page['name']} will still be connected, just without the linked Instagram")
+                        continue  # Skip to next page, but don't fail the Facebook connection
 
                     # Check if Instagram account already exists for this user (by exact platform_user_id)
                     existing_ig_account = (
