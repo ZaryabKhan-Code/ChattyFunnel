@@ -36,17 +36,25 @@ export default function Dashboard() {
     setWorkspaceId(wid)
     loadConnectedAccounts(uid, wid)
 
-    // Check for OAuth success
+    // Check for OAuth success or error
     const params = new URLSearchParams(window.location.search)
     const success = params.get('success')
+    const error = params.get('error')
+    const message = params.get('message')
+
     if (success === 'facebook') {
-      alert('✅ Facebook connected successfully!')
+      alert('Facebook connected successfully!')
       window.history.replaceState({}, '', '/dashboard')
       loadConnectedAccounts(uid, wid)
     } else if (success === 'instagram') {
-      alert('✅ Instagram connected successfully!')
+      alert('Instagram connected successfully!')
       window.history.replaceState({}, '', '/dashboard')
       loadConnectedAccounts(uid, wid)
+    } else if (error) {
+      // Show error message from OAuth callback
+      const errorMessage = message ? decodeURIComponent(message) : 'Failed to connect account. Please try again.'
+      alert(`Error: ${errorMessage}`)
+      window.history.replaceState({}, '', '/dashboard')
     }
   }, [router])
 
