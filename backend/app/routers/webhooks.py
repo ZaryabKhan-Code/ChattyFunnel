@@ -429,9 +429,9 @@ async def handle_facebook_message(event: Dict[str, Any], db: Session):
             .first()
         )
 
-        # Log detailed info if account not found
+        # IMPORTANT: Check if there's an INACTIVE account for this page_id
+        # If found, we should REJECT the webhook - don't process at all
         if not account:
-            # Check if there's an inactive account or inactive workspace
             inactive_account = (
                 db.query(ConnectedAccount)
                 .filter(
@@ -443,9 +443,13 @@ async def handle_facebook_message(event: Dict[str, Any], db: Session):
             if inactive_account:
                 workspace = db.query(Workspace).filter(Workspace.id == inactive_account.workspace_id).first()
                 if not inactive_account.is_active:
-                    logger.warning(f"⚠️  Found Facebook account but it is INACTIVE (account.is_active=False)")
+                    logger.warning(f"🚫 REJECTING webhook: Facebook account for page {page_id} is INACTIVE (is_active=False)")
+                    logger.warning(f"🚫 Account ID: {inactive_account.id}, Page: {inactive_account.page_name}")
+                    return  # Reject the webhook
                 if workspace and not workspace.is_active:
-                    logger.warning(f"⚠️  Found Facebook account but its workspace is INACTIVE (workspace.is_active=False)")
+                    logger.warning(f"🚫 REJECTING webhook: Facebook account's workspace is INACTIVE (workspace.is_active=False)")
+                    logger.warning(f"🚫 Account ID: {inactive_account.id}, Workspace ID: {workspace.id}")
+                    return  # Reject the webhook
 
         if account:
             logger.info(f"✅ Found connected account: {account.id} (user: {account.user_id})")
@@ -770,6 +774,30 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                 )
                 .first()
             )
+
+        # IMPORTANT: Before IGAAL fallback, check if there's an INACTIVE account for this recipient_id
+        # If found, we should REJECT the webhook - don't let other accounts process it
+        if not account:
+            inactive_account_check = (
+                db.query(ConnectedAccount)
+                .filter(
+                    ConnectedAccount.platform == "instagram",
+                    (ConnectedAccount.platform_user_id == ig_account_id) | (ConnectedAccount.page_id == ig_account_id),
+                )
+                .first()
+            )
+
+            if inactive_account_check:
+                # We found an account for this recipient_id, but it's inactive or its workspace is inactive
+                workspace = db.query(Workspace).filter(Workspace.id == inactive_account_check.workspace_id).first()
+                if not inactive_account_check.is_active:
+                    logger.warning(f"🚫 REJECTING webhook: Instagram account for {ig_account_id} is INACTIVE (is_active=False)")
+                    logger.warning(f"🚫 Account ID: {inactive_account_check.id}, Username: @{inactive_account_check.platform_username}")
+                    return  # Reject the webhook - don't process with another account
+                if workspace and not workspace.is_active:
+                    logger.warning(f"🚫 REJECTING webhook: Instagram account's workspace is INACTIVE (workspace.is_active=False)")
+                    logger.warning(f"🚫 Account ID: {inactive_account_check.id}, Workspace ID: {workspace.id}")
+                    return  # Reject the webhook - don't process with another account
 
         # Final fallback: Check Instagram Business Login accounts
         # For Instagram Business Login, /me returns Instagram-scoped User ID (stored in page_id)

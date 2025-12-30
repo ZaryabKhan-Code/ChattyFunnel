@@ -217,8 +217,20 @@ async def facebook_callback(
                 redirect_url = f"{settings.FRONTEND_URL}/dashboard?error=facebook_in_use&message={error_msg}"
                 return RedirectResponse(url=redirect_url)
 
-            # Check if account already exists for this user
-            existing_account = (
+            # Check if account already exists for this user in the REQUESTED workspace
+            existing_account_in_workspace = (
+                db.query(ConnectedAccount)
+                .filter(
+                    ConnectedAccount.user_id == user.id,
+                    ConnectedAccount.platform == "facebook",
+                    ConnectedAccount.page_id == page["id"],
+                    ConnectedAccount.workspace_id == workspace_id,
+                )
+                .first()
+            )
+
+            # Also check if there's an account in ANY workspace (for migration)
+            existing_account_any_workspace = (
                 db.query(ConnectedAccount)
                 .filter(
                     ConnectedAccount.user_id == user.id,
@@ -228,17 +240,32 @@ async def facebook_callback(
                 .first()
             )
 
-            if existing_account:
-                logger.info(f"Updating existing account ID: {existing_account.id}")
-                # Update existing account
-                existing_account.access_token = page["access_token"]
-                existing_account.platform_username = page["name"]
-                existing_account.connection_type = "facebook_page"
-                existing_account.token_expires_at = datetime.utcnow() + timedelta(
+            if existing_account_in_workspace:
+                # Account exists in the requested workspace - just update it
+                logger.info(f"Updating existing account ID: {existing_account_in_workspace.id} in workspace {workspace_id}")
+                existing_account_in_workspace.access_token = page["access_token"]
+                existing_account_in_workspace.platform_username = page["name"]
+                existing_account_in_workspace.page_name = page["name"]
+                existing_account_in_workspace.connection_type = "facebook_page"
+                existing_account_in_workspace.token_expires_at = datetime.utcnow() + timedelta(
                     seconds=expires_in
                 )
-                existing_account.is_active = True
-                existing_account.updated_at = datetime.utcnow()
+                existing_account_in_workspace.is_active = True
+                existing_account_in_workspace.updated_at = datetime.utcnow()
+            elif existing_account_any_workspace and not existing_account_any_workspace.is_active:
+                # Account exists in another workspace but is INACTIVE - move it to new workspace
+                old_workspace = existing_account_any_workspace.workspace_id
+                logger.info(f"Moving inactive Facebook account from workspace {old_workspace} to workspace {workspace_id}")
+                existing_account_any_workspace.workspace_id = workspace_id
+                existing_account_any_workspace.access_token = page["access_token"]
+                existing_account_any_workspace.platform_username = page["name"]
+                existing_account_any_workspace.page_name = page["name"]
+                existing_account_any_workspace.connection_type = "facebook_page"
+                existing_account_any_workspace.token_expires_at = datetime.utcnow() + timedelta(
+                    seconds=expires_in
+                )
+                existing_account_any_workspace.is_active = True
+                existing_account_any_workspace.updated_at = datetime.utcnow()
             else:
                 logger.info("Creating new connected account...")
                 # Create new account
@@ -619,7 +646,7 @@ async def instagram_callback(
                 return RedirectResponse(url=redirect_url)
 
             # Check if account already exists for this user IN THIS WORKSPACE
-            existing_account = (
+            existing_account_in_workspace = (
                 db.query(ConnectedAccount)
                 .filter(
                     ConnectedAccount.user_id == user.id,
@@ -635,19 +662,52 @@ async def instagram_callback(
                 .first()
             )
 
-            if existing_account:
-                logger.info(f"Updating existing Instagram account ID: {existing_account.id}")
+            # Also check if there's an INACTIVE account in any workspace (for migration)
+            existing_account_any_workspace = (
+                db.query(ConnectedAccount)
+                .filter(
+                    ConnectedAccount.user_id == user.id,
+                    ConnectedAccount.platform == "instagram",
+                    ConnectedAccount.is_active == False,  # Only check inactive accounts
+                )
+                .filter(
+                    or_(
+                        ConnectedAccount.platform_user_id == instagram_account_id,
+                        ConnectedAccount.platform_username == ig_account.get("username"),
+                    )
+                )
+                .first()
+            )
+
+            if existing_account_in_workspace:
+                logger.info(f"Updating existing Instagram account ID: {existing_account_in_workspace.id} in workspace {workspace_id}")
                 # Update existing account
-                existing_account.access_token = access_token
-                existing_account.platform_username = ig_account.get("username")
+                existing_account_in_workspace.access_token = access_token
+                existing_account_in_workspace.platform_username = ig_account.get("username")
                 # Store Instagram-scoped User ID for API calls
-                existing_account.page_id = instagram_scoped_user_id
-                existing_account.connection_type = "instagram_business_login"
-                existing_account.token_expires_at = datetime.utcnow() + timedelta(
+                existing_account_in_workspace.page_id = instagram_scoped_user_id
+                existing_account_in_workspace.platform_user_id = instagram_account_id
+                existing_account_in_workspace.connection_type = "instagram_business_login"
+                existing_account_in_workspace.token_expires_at = datetime.utcnow() + timedelta(
                     seconds=expires_in
                 )
-                existing_account.is_active = True
-                existing_account.updated_at = datetime.utcnow()
+                existing_account_in_workspace.is_active = True
+                existing_account_in_workspace.updated_at = datetime.utcnow()
+            elif existing_account_any_workspace:
+                # Found an INACTIVE account in another workspace - move it to new workspace
+                old_workspace = existing_account_any_workspace.workspace_id
+                logger.info(f"Moving inactive Instagram account from workspace {old_workspace} to workspace {workspace_id}")
+                existing_account_any_workspace.workspace_id = workspace_id
+                existing_account_any_workspace.access_token = access_token
+                existing_account_any_workspace.platform_username = ig_account.get("username")
+                existing_account_any_workspace.page_id = instagram_scoped_user_id
+                existing_account_any_workspace.platform_user_id = instagram_account_id
+                existing_account_any_workspace.connection_type = "instagram_business_login"
+                existing_account_any_workspace.token_expires_at = datetime.utcnow() + timedelta(
+                    seconds=expires_in
+                )
+                existing_account_any_workspace.is_active = True
+                existing_account_any_workspace.updated_at = datetime.utcnow()
             else:
                 logger.info("Creating new Instagram connected account...")
                 # Create new account
