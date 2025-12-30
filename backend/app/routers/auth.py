@@ -684,38 +684,12 @@ async def instagram_callback(
             logger.error(f"⚠️  Failed to subscribe webhooks: {webhook_error}")
             # Don't fail the OAuth flow if webhook subscription fails
 
-        # Auto-sync conversations for all connected Instagram accounts
-        logger.info("Starting auto-sync of Instagram conversations...")
-        total_synced = 0
-        for ig_account in ig_accounts:
-            try:
-                # Get the connected account we just created/updated
-                account = (
-                    db.query(ConnectedAccount)
-                    .filter(
-                        ConnectedAccount.user_id == user.id,
-                        ConnectedAccount.platform == "instagram",
-                        ConnectedAccount.platform_user_id == ig_account["id"],
-                    )
-                    .first()
-                )
-
-                if account:
-                    logger.info(f"Syncing conversations for Instagram account {ig_account['id']}...")
-                    synced_count = await sync_account_messages(db, account)
-                    total_synced += synced_count
-                    logger.info(f"Synced {synced_count} messages from Instagram account")
-            except Exception as sync_error:
-                # Don't fail the OAuth flow if sync fails
-                logger.error(f"Failed to auto-sync Instagram account {ig_account['id']}: {sync_error}")
-
-        logger.info(f"Auto-sync completed. Total messages synced: {total_synced}")
-
-        # Extract Instagram Account ID from conversations for webhook matching
-        # This is CRITICAL: Instagram Business Login provides two IDs:
+        # IMPORTANT: Extract Instagram Account ID BEFORE syncing
+        # Instagram Business Login provides two different IDs:
         # 1. Instagram-scoped User ID (from token exchange) - for API calls, stored in page_id
-        # 2. Instagram Account ID (from conversation participants) - for webhooks, should be in platform_user_id
-        logger.info("🔍 Attempting to extract Instagram Account ID from conversations...")
+        # 2. Instagram Account ID (from conversation participants) - for webhooks AND message direction detection
+        # We need the correct ID for message sync to work properly
+        logger.info("🔍 Extracting Instagram Account ID from conversations BEFORE sync...")
         for ig_account in ig_accounts:
             try:
                 account = (
@@ -723,34 +697,63 @@ async def instagram_callback(
                     .filter(
                         ConnectedAccount.user_id == user.id,
                         ConnectedAccount.platform == "instagram",
-                        ConnectedAccount.page_id == instagram_user_id,
+                        ConnectedAccount.workspace_id == workspace_id,
                     )
                     .first()
                 )
 
                 if account:
                     # Extract Instagram Account ID from conversation participants
-                    instagram_account_id = await ig_service.extract_instagram_account_id_from_conversations(
+                    real_instagram_account_id = await ig_service.extract_instagram_account_id_from_conversations(
                         instagram_scoped_user_id=instagram_user_id,
                         access_token=long_lived_token,
                         business_username=ig_account.get("username")
                     )
 
-                    if instagram_account_id:
+                    if real_instagram_account_id:
                         # Update platform_user_id with the correct Instagram Account ID
                         old_id = account.platform_user_id
-                        account.platform_user_id = instagram_account_id
+                        account.platform_user_id = real_instagram_account_id
                         db.commit()
-                        logger.info(f"✅ Updated platform_user_id: {old_id} → {instagram_account_id}")
-                        logger.info(f"✅ Account now ready for webhook matching!")
+                        logger.info(f"✅ Updated platform_user_id BEFORE sync: {old_id} → {real_instagram_account_id}")
+                        logger.info(f"✅ Account now ready for proper message direction detection!")
                     else:
-                        logger.warning("⚠️  No conversations found - platform_user_id will be updated when first conversation is synced")
-                        logger.info(f"ℹ️  Current platform_user_id: {account.platform_user_id} (Instagram-scoped User ID)")
-                        logger.info(f"ℹ️  Webhooks will auto-fix this on first message received")
+                        logger.warning("⚠️  No conversations found - platform_user_id will remain as Instagram-scoped ID")
+                        logger.info(f"ℹ️  Current platform_user_id: {account.platform_user_id}")
 
             except Exception as id_extract_error:
                 logger.error(f"Failed to extract Instagram Account ID: {id_extract_error}")
                 # Don't fail OAuth flow if ID extraction fails
+
+        # Auto-sync conversations for all connected Instagram accounts
+        # NOW the platform_user_id is correct for message direction detection
+        logger.info("Starting auto-sync of Instagram conversations...")
+        total_synced = 0
+        for ig_account in ig_accounts:
+            try:
+                # Get the connected account we just created/updated (with correct platform_user_id)
+                account = (
+                    db.query(ConnectedAccount)
+                    .filter(
+                        ConnectedAccount.user_id == user.id,
+                        ConnectedAccount.platform == "instagram",
+                        ConnectedAccount.workspace_id == workspace_id,
+                    )
+                    .first()
+                )
+
+                if account:
+                    logger.info(f"Syncing conversations for Instagram account {account.platform_user_id}...")
+                    synced_count = await sync_account_messages(db, account)
+                    total_synced += synced_count
+                    logger.info(f"Synced {synced_count} messages from Instagram account")
+            except Exception as sync_error:
+                # Don't fail the OAuth flow if sync fails
+                logger.error(f"Failed to auto-sync Instagram account: {sync_error}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
+
+        logger.info(f"Auto-sync completed. Total messages synced: {total_synced}")
 
         # Redirect to frontend success page
         from app.config import settings
