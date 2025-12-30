@@ -20,10 +20,9 @@ export function useWebSocket(userId: number | null) {
   const reconnectAttempts = useRef(0)
   const messageQueue = useRef<string[]>([])
   const isManualClose = useRef(false)
+  const isConnecting = useRef(false) // Prevent duplicate connection attempts
 
-  const connect = useRef<(() => void) | null>(null)
-
-  // Get WebSocket URL - Updated to use /api/v1/ws/
+  // Get WebSocket URL
   const getWebSocketUrl = useCallback(() => {
     const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'https://roamifly-admin-b97e90c67026.herokuapp.com/api'
     const wsProtocol = apiUrl.includes('https') ? 'wss' : 'ws'
@@ -55,37 +54,74 @@ export function useWebSocket(userId: number | null) {
     }
   }, [])
 
+  // Cleanup function for intervals and timeouts
+  const cleanup = useCallback(() => {
+    if (pingInterval.current) {
+      clearInterval(pingInterval.current)
+      pingInterval.current = null
+    }
+    if (pongTimeout.current) {
+      clearTimeout(pongTimeout.current)
+      pongTimeout.current = null
+    }
+    if (reconnectTimeout.current) {
+      clearTimeout(reconnectTimeout.current)
+      reconnectTimeout.current = null
+    }
+  }, [])
+
   useEffect(() => {
     if (!userId) return
 
     const wsUrl = getWebSocketUrl()
 
-    connect.current = () => {
+    const connect = () => {
+      // Prevent duplicate connections
+      if (isConnecting.current) {
+        console.log('⚠️ Already connecting, skipping...')
+        return
+      }
+
       // Don't reconnect if manually closed
       if (isManualClose.current) {
         console.log('⚠️ Manual close - not reconnecting')
         return
       }
 
+      // Check if already connected
+      if (ws.current?.readyState === WebSocket.OPEN) {
+        console.log('✅ Already connected, skipping...')
+        return
+      }
+
+      // Check if currently connecting
+      if (ws.current?.readyState === WebSocket.CONNECTING) {
+        console.log('⏳ Connection in progress, skipping...')
+        return
+      }
+
+      isConnecting.current = true
       console.log('🔌 Connecting to WebSocket:', wsUrl)
       setConnectionState('connecting')
       setLastError(null)
 
-      // Clean up existing connection if any
+      // Clean up existing connection
+      cleanup()
       if (ws.current) {
+        ws.current.onclose = null // Remove handler to prevent reconnect loop
+        ws.current.onerror = null
+        ws.current.onmessage = null
+        ws.current.onopen = null
         ws.current.close()
+        ws.current = null
       }
 
       try {
-        // Connect to WebSocket
         ws.current = new WebSocket(wsUrl)
-
-        if (!ws.current) {
-          throw new Error('Failed to create WebSocket instance')
-        }
 
         ws.current.onopen = () => {
           console.log('✅ WebSocket connected successfully')
+          isConnecting.current = false
           setIsConnected(true)
           setConnectionState('connected')
           setLastError(null)
@@ -97,41 +133,28 @@ export function useWebSocket(userId: number | null) {
           // Send ping every 15 seconds to keep connection alive
           pingInterval.current = setInterval(() => {
             if (ws.current?.readyState === WebSocket.OPEN) {
-              console.log('🏓 Sending ping...')
               ws.current.send('ping')
 
               // Set timeout to detect if pong is not received
               pongTimeout.current = setTimeout(() => {
-                console.error('❌ Pong not received! Connection appears dead. Reconnecting...')
+                console.error('❌ Pong not received! Reconnecting...')
                 setIsConnected(false)
                 setConnectionState('error')
                 setLastError('Heartbeat timeout')
                 if (ws.current) {
                   ws.current.close()
                 }
-                // Reconnect will happen in onclose
-              }, 5000) // Wait 5 seconds for pong
+              }, 5000)
             }
-          }, 15000) // Ping every 15 seconds
+          }, 15000)
         }
-      } catch (error) {
-        console.error('❌ Failed to create WebSocket:', error)
-        setConnectionState('error')
-        setLastError('Failed to create connection')
-      }
 
-      if (ws.current) {
         ws.current.onmessage = (event) => {
           try {
-            console.log('🔔 Raw WebSocket message received:', event.data)
             const data = JSON.parse(event.data)
-            console.log('🔔 Parsed WebSocket message:', data)
-            console.log('🔔 Message type:', data.type)
 
             // Handle pong response
             if (data.type === 'pong') {
-              console.log('✅ Pong received - connection alive')
-              // Clear the pong timeout since we received response
               if (pongTimeout.current) {
                 clearTimeout(pongTimeout.current)
                 pongTimeout.current = null
@@ -140,157 +163,129 @@ export function useWebSocket(userId: number | null) {
             }
 
             // Update last message for all other message types
-            console.log('🔔 Message data:', data.data)
+            console.log('🔔 WebSocket message:', data.type, data.data)
             setLastMessage(data)
           } catch (error) {
-            console.error('❌ Failed to parse WebSocket message:', error, event.data)
-            // Still try to set message even if parsing fails
-            setLastMessage({
-              type: 'error',
-              data: { error: 'Failed to parse message', raw: event.data }
-            })
+            console.error('❌ Failed to parse WebSocket message:', error)
           }
         }
 
         ws.current.onerror = (error) => {
-          console.error('❌ WebSocket error:', error)
+          console.error('❌ WebSocket error')
+          isConnecting.current = false
           setIsConnected(false)
           setConnectionState('error')
           setLastError('WebSocket connection error')
         }
 
         ws.current.onclose = (event) => {
-          console.log('🔌 WebSocket disconnected', {
-            code: event.code,
-            reason: event.reason,
-            wasClean: event.wasClean
-          })
+          console.log('🔌 WebSocket disconnected', { code: event.code, wasClean: event.wasClean })
+          isConnecting.current = false
           setIsConnected(false)
           setConnectionState('disconnected')
+          cleanup()
 
-          // Clear intervals and timeouts
-          if (pingInterval.current) {
-            clearInterval(pingInterval.current)
-            pingInterval.current = null
-          }
-          if (pongTimeout.current) {
-            clearTimeout(pongTimeout.current)
-            pongTimeout.current = null
-          }
-
-          // Don't reconnect if it was a manual close or user not found (code 1008)
+          // Don't reconnect if manually closed or user not found
           if (isManualClose.current || event.code === 1008) {
-            console.log('❌ Not reconnecting:', {
-              manual: isManualClose.current,
-              userNotFound: event.code === 1008
-            })
-            setLastError(event.code === 1008 ? 'User not found' : 'Connection closed')
             return
           }
 
           // Attempt to reconnect with exponential backoff
-          // Start immediately, then 1s, 2s, 4s, max 10 seconds
-          const delay = reconnectAttempts.current === 0 ? 100 : Math.min(1000 * Math.pow(2, reconnectAttempts.current - 1), 10000)
+          const delay = reconnectAttempts.current === 0 ? 500 : Math.min(1000 * Math.pow(2, reconnectAttempts.current - 1), 10000)
           reconnectAttempts.current++
 
           console.log(`🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current})...`)
-          setLastError(`Reconnecting in ${Math.round(delay / 1000)}s (attempt ${reconnectAttempts.current})`)
+          setLastError(`Reconnecting... (attempt ${reconnectAttempts.current})`)
 
-          reconnectTimeout.current = setTimeout(() => {
-            if (connect.current) {
-              connect.current()
-            }
-          }, delay)
+          reconnectTimeout.current = setTimeout(connect, delay)
         }
+      } catch (error) {
+        console.error('❌ Failed to create WebSocket:', error)
+        isConnecting.current = false
+        setConnectionState('error')
+        setLastError('Failed to create connection')
       }
     }
 
-    // Initial connection
-    connect.current?.()
+    // Initial connection with small delay to avoid React StrictMode double-mount issues
+    const initTimeout = setTimeout(() => {
+      isManualClose.current = false
+      connect()
+    }, 100)
 
     // Monitor online/offline status
     const handleOnline = () => {
-      console.log('🌐 Network is online - reconnecting WebSocket')
-      if (!isConnected && connect.current) {
-        reconnectAttempts.current = 0 // Reset attempts when network comes back
-        connect.current()
+      console.log('🌐 Network is online')
+      if (!isConnected && !isConnecting.current) {
+        reconnectAttempts.current = 0
+        connect()
       }
     }
 
     const handleOffline = () => {
-      console.log('📡 Network is offline - WebSocket will reconnect when online')
+      console.log('📡 Network is offline')
       setConnectionState('disconnected')
       setLastError('Network offline')
     }
 
-    // Reconnect when tab becomes visible
+    // Reconnect when tab becomes visible (with debounce)
+    let visibilityTimeout: NodeJS.Timeout | null = null
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
-        console.log('👁️ Tab became visible - checking WebSocket connection')
-        if (ws.current?.readyState !== WebSocket.OPEN && connect.current && !isManualClose.current) {
-          console.log('🔄 WebSocket not open, reconnecting...')
-          reconnectAttempts.current = 0
-          connect.current()
-        }
-      }
-    }
-
-    // Focus handler for immediate reconnection
-    const handleFocus = () => {
-      console.log('🎯 Window focused - checking WebSocket connection')
-      if (ws.current?.readyState !== WebSocket.OPEN && connect.current && !isManualClose.current) {
-        console.log('🔄 WebSocket not open, reconnecting...')
-        reconnectAttempts.current = 0
-        connect.current()
+        if (visibilityTimeout) clearTimeout(visibilityTimeout)
+        visibilityTimeout = setTimeout(() => {
+          if (ws.current?.readyState !== WebSocket.OPEN && !isConnecting.current && !isManualClose.current) {
+            console.log('👁️ Tab visible - reconnecting')
+            reconnectAttempts.current = 0
+            connect()
+          }
+        }, 500)
       }
     }
 
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
     document.addEventListener('visibilitychange', handleVisibilityChange)
-    window.addEventListener('focus', handleFocus)
 
     // Cleanup
     return () => {
+      clearTimeout(initTimeout)
+      if (visibilityTimeout) clearTimeout(visibilityTimeout)
       isManualClose.current = true
+      cleanup()
 
       if (ws.current) {
+        ws.current.onclose = null
+        ws.current.onerror = null
+        ws.current.onmessage = null
+        ws.current.onopen = null
         ws.current.close()
-      }
-      if (pingInterval.current) {
-        clearInterval(pingInterval.current)
-      }
-      if (pongTimeout.current) {
-        clearTimeout(pongTimeout.current)
-      }
-      if (reconnectTimeout.current) {
-        clearTimeout(reconnectTimeout.current)
+        ws.current = null
       }
 
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
-      window.removeEventListener('focus', handleFocus)
     }
-  }, [userId, getWebSocketUrl, flushMessageQueue])
+  }, [userId, getWebSocketUrl, flushMessageQueue, cleanup])
 
   // Manual disconnect function
   const disconnect = useCallback(() => {
     isManualClose.current = true
+    cleanup()
     if (ws.current) {
       ws.current.close()
     }
     setIsConnected(false)
     setConnectionState('disconnected')
-  }, [])
+  }, [cleanup])
 
   // Manual reconnect function
   const reconnect = useCallback(() => {
     isManualClose.current = false
+    isConnecting.current = false
     reconnectAttempts.current = 0
-    if (connect.current) {
-      connect.current()
-    }
+    // Will be handled by effect
   }, [])
 
   return {
