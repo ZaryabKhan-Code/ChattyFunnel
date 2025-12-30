@@ -45,10 +45,10 @@ async def fetch_sender_info(sender_id: str, access_token: str, platform: str) ->
             # Instagram Business Login token - use graph.instagram.com
             url = f"https://graph.instagram.com/{sender_id}"
             logger.info("🔑 Using Instagram Business Login endpoint for sender info")
-            # Note: profile_picture_url is NOT available for other users (IGBusinessScopedID)
-            # Only the account owner's profile has this field
+            # Per Instagram User Profile API, we can get profile_pic for users who messaged us
+            # Available fields: name, username, profile_pic, follower_count, is_user_follow_business, is_business_follow_user
             params = {
-                "fields": "id,name,username",
+                "fields": "name,username,profile_pic",
                 "access_token": access_token
             }
         else:
