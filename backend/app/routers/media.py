@@ -148,6 +148,17 @@ async def get_attachment(
         raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 
+def get_placeholder_avatar():
+    """Return a simple SVG placeholder avatar"""
+    # A simple gray circle with a person silhouette
+    svg = '''<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r="50" fill="#e5e7eb"/>
+        <circle cx="50" cy="35" r="15" fill="#9ca3af"/>
+        <ellipse cx="50" cy="80" rx="25" ry="20" fill="#9ca3af"/>
+    </svg>'''
+    return svg.encode('utf-8')
+
+
 @router.get("/profile-pic")
 async def proxy_profile_picture(url: str = Query(...)):
     """
@@ -155,6 +166,7 @@ async def proxy_profile_picture(url: str = Query(...)):
 
     Instagram CDN URLs often have CORS issues when accessed directly from frontend.
     This endpoint proxies the request to avoid CORS and referrer policy issues.
+    Returns a placeholder avatar if the image can't be fetched.
     """
     logger.info(f"🖼️  Proxying profile picture: {url[:100]}...")
 
@@ -168,10 +180,15 @@ async def proxy_profile_picture(url: str = Query(...)):
             response = await client.get(url, headers=headers)
 
             if response.status_code != 200:
-                logger.warning(f"⚠️  Failed to fetch profile pic: {response.status_code}")
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Failed to fetch profile picture: {response.status_code}"
+                logger.warning(f"⚠️  Failed to fetch profile pic: {response.status_code}, returning placeholder")
+                # Return a placeholder avatar instead of throwing error
+                return StreamingResponse(
+                    iter([get_placeholder_avatar()]),
+                    media_type="image/svg+xml",
+                    headers={
+                        "Cache-Control": "public, max-age=60",  # Cache placeholder for 1 minute only
+                        "Access-Control-Allow-Origin": "*",
+                    }
                 )
 
             content_type = response.headers.get("content-type", "image/jpeg")
@@ -187,8 +204,22 @@ async def proxy_profile_picture(url: str = Query(...)):
             )
 
     except httpx.HTTPError as e:
-        logger.error(f"❌ HTTP error fetching profile pic: {e}")
-        raise HTTPException(status_code=502, detail=f"Failed to fetch profile picture: {str(e)}")
+        logger.warning(f"⚠️  HTTP error fetching profile pic: {e}, returning placeholder")
+        return StreamingResponse(
+            iter([get_placeholder_avatar()]),
+            media_type="image/svg+xml",
+            headers={
+                "Cache-Control": "public, max-age=60",
+                "Access-Control-Allow-Origin": "*",
+            }
+        )
     except Exception as e:
-        logger.error(f"❌ Error fetching profile pic: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
+        logger.warning(f"⚠️  Error fetching profile pic: {e}, returning placeholder")
+        return StreamingResponse(
+            iter([get_placeholder_avatar()]),
+            media_type="image/svg+xml",
+            headers={
+                "Cache-Control": "public, max-age=60",
+                "Access-Control-Allow-Origin": "*",
+            }
+        )
