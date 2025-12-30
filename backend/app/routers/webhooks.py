@@ -778,22 +778,26 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
 
         # IMPORTANT: Before IGAAL fallback, check if there's an INACTIVE account for this recipient_id
         # If found, we should REJECT the webhook - don't let other accounts process it
+        # NOTE: Only check platform_user_id, NOT page_id. The page_id field is used for API calls
+        # (Instagram-scoped User ID or Facebook Page ID), not for webhook recipient matching.
+        # Using page_id here would incorrectly match unrelated accounts.
         if not account:
             inactive_account_check = (
                 db.query(ConnectedAccount)
                 .filter(
                     ConnectedAccount.platform == "instagram",
-                    (ConnectedAccount.platform_user_id == ig_account_id) | (ConnectedAccount.page_id == ig_account_id),
+                    ConnectedAccount.platform_user_id == ig_account_id,
                 )
                 .first()
             )
 
             if inactive_account_check:
-                # We found an account for this recipient_id, but it's inactive or its workspace is inactive
+                # We found an account with matching platform_user_id (webhook recipient ID)
                 workspace = db.query(Workspace).filter(Workspace.id == inactive_account_check.workspace_id).first()
                 if not inactive_account_check.is_active:
                     logger.warning(f"🚫 REJECTING webhook: Instagram account for {ig_account_id} is INACTIVE (is_active=False)")
                     logger.warning(f"🚫 Account ID: {inactive_account_check.id}, Username: @{inactive_account_check.platform_username}")
+                    logger.warning(f"🚫 platform_user_id: {inactive_account_check.platform_user_id}")
                     return  # Reject the webhook - don't process with another account
                 if workspace and not workspace.is_active:
                     logger.warning(f"🚫 REJECTING webhook: Instagram account's workspace is INACTIVE (workspace.is_active=False)")
