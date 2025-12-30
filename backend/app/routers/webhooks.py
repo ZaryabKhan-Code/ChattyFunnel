@@ -8,7 +8,7 @@ import logging
 from datetime import datetime
 
 from app.database import get_db, SessionLocal
-from app.models import Message, ConnectedAccount, MessageDirection, MessageStatus, MessageType, ConversationParticipant, AISettings
+from app.models import Message, ConnectedAccount, MessageDirection, MessageStatus, MessageType, ConversationParticipant, AISettings, Workspace
 from app.config import settings
 from app.websocket_manager import manager
 from app.services import FacebookService, InstagramService, AIService
@@ -415,16 +415,37 @@ async def handle_facebook_message(event: Dict[str, Any], db: Session):
             logger.info(f"Processing incoming message (from user {user_psid} to page {page_id})")
 
         # Find the connected account using page_id
+        # IMPORTANT: Only process for ACTIVE accounts in ACTIVE workspaces
         logger.info(f"Looking for connected account with page_id: {page_id}")
         account = (
             db.query(ConnectedAccount)
+            .join(Workspace, ConnectedAccount.workspace_id == Workspace.id)
             .filter(
                 ConnectedAccount.platform == "facebook",
                 ConnectedAccount.page_id == page_id,
                 ConnectedAccount.is_active == True,
+                Workspace.is_active == True,
             )
             .first()
         )
+
+        # Log detailed info if account not found
+        if not account:
+            # Check if there's an inactive account or inactive workspace
+            inactive_account = (
+                db.query(ConnectedAccount)
+                .filter(
+                    ConnectedAccount.platform == "facebook",
+                    ConnectedAccount.page_id == page_id,
+                )
+                .first()
+            )
+            if inactive_account:
+                workspace = db.query(Workspace).filter(Workspace.id == inactive_account.workspace_id).first()
+                if not inactive_account.is_active:
+                    logger.warning(f"⚠️  Found Facebook account but it is INACTIVE (account.is_active=False)")
+                if workspace and not workspace.is_active:
+                    logger.warning(f"⚠️  Found Facebook account but its workspace is INACTIVE (workspace.is_active=False)")
 
         if account:
             logger.info(f"✅ Found connected account: {account.id} (user: {account.user_id})")
@@ -718,15 +739,19 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
         # Support both Instagram connection types:
         # - Instagram Business Login: ig_account_id matches platform_user_id (Instagram Account ID)
         # - Facebook Page-managed Instagram: ig_account_id matches platform_user_id (Instagram Account ID)
+        # IMPORTANT: Only process for ACTIVE accounts in ACTIVE workspaces
         logger.info(f"Looking for Instagram connected account with ig_account_id: {ig_account_id}")
 
         # Try platform_user_id first (should match Instagram Account ID)
+        # Join with Workspace to check if workspace is active
         account = (
             db.query(ConnectedAccount)
+            .join(Workspace, ConnectedAccount.workspace_id == Workspace.id)
             .filter(
                 ConnectedAccount.platform == "instagram",
                 ConnectedAccount.platform_user_id == ig_account_id,
                 ConnectedAccount.is_active == True,
+                Workspace.is_active == True,
             )
             .first()
         )
@@ -736,10 +761,12 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
             logger.info(f"Not found by platform_user_id, trying page_id...")
             account = (
                 db.query(ConnectedAccount)
+                .join(Workspace, ConnectedAccount.workspace_id == Workspace.id)
                 .filter(
                     ConnectedAccount.platform == "instagram",
                     ConnectedAccount.page_id == ig_account_id,
                     ConnectedAccount.is_active == True,
+                    Workspace.is_active == True,
                 )
                 .first()
             )
@@ -748,12 +775,15 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
         if not account:
             logger.info(f"Not found by page_id, checking Instagram Business Login accounts...")
             # Find all Instagram accounts with IGAAL tokens (Instagram Business Login)
+            # Only check accounts in ACTIVE workspaces
             igaal_accounts = (
                 db.query(ConnectedAccount)
+                .join(Workspace, ConnectedAccount.workspace_id == Workspace.id)
                 .filter(
                     ConnectedAccount.platform == "instagram",
                     ConnectedAccount.access_token.like("IGAAL%"),
                     ConnectedAccount.is_active == True,
+                    Workspace.is_active == True,
                 )
                 .all()
             )
@@ -787,6 +817,24 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                 except Exception as e:
                     logger.warning(f"Failed to check IGAAL account {igaal_account.id}: {e}")
                     continue
+
+        # Log detailed info if account not found
+        if not account:
+            # Check if there's an inactive account or inactive workspace
+            inactive_account = (
+                db.query(ConnectedAccount)
+                .filter(
+                    ConnectedAccount.platform == "instagram",
+                    ConnectedAccount.platform_user_id == ig_account_id,
+                )
+                .first()
+            )
+            if inactive_account:
+                workspace = db.query(Workspace).filter(Workspace.id == inactive_account.workspace_id).first()
+                if not inactive_account.is_active:
+                    logger.warning(f"⚠️  Found Instagram account but it is INACTIVE (account.is_active=False)")
+                if workspace and not workspace.is_active:
+                    logger.warning(f"⚠️  Found Instagram account but its workspace is INACTIVE (workspace.is_active=False)")
 
         if account:
             logger.info(f"✅ Found Instagram connected account: {account.id} (user: {account.user_id})")
