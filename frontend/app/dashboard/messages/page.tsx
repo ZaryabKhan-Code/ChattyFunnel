@@ -12,16 +12,23 @@ interface Conversation {
   id: string
   participant_name: string
   participant_username: string
+  participant_profile_pic?: string
   last_message?: string
   updated_at?: string
+  platform?: string
 }
 
 interface Message {
   id: number
   message_text: string
+  content?: string
   direction: string
   created_at: string
   sender_id: string
+  message_type?: string
+  attachment_url?: string
+  attachment_type?: string
+  attachment_filename?: string
 }
 
 export default function Messages() {
@@ -79,9 +86,13 @@ export default function Messages() {
           const newMessage: Message = {
             id: newMsg.id,
             message_text: newMsg.content || '',
+            content: newMsg.content || '',
             direction: newMsg.direction || 'incoming',
             created_at: newMsg.created_at,
-            sender_id: newMsg.sender_id
+            sender_id: newMsg.sender_id,
+            message_type: newMsg.message_type,
+            attachment_url: newMsg.attachment_url,
+            attachment_type: newMsg.attachment_type
           }
           return [...prev, newMessage]
         })
@@ -185,11 +196,38 @@ export default function Messages() {
                   onClick={() => handleSelectConversation(conv.id)}
                   className={`p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${selectedConversation === conv.id ? 'bg-blue-50' : ''}`}
                 >
-                  <div className="font-semibold text-sm">{conv.participant_name}</div>
-                  <div className="text-xs text-gray-500">@{conv.participant_username}</div>
-                  {conv.last_message && (
-                    <div className="text-xs text-gray-600 mt-1 truncate">{conv.last_message}</div>
-                  )}
+                  <div className="flex items-center gap-3">
+                    {/* Profile Picture */}
+                    <div className="flex-shrink-0">
+                      {conv.participant_profile_pic ? (
+                        <img
+                          src={conv.participant_profile_pic}
+                          alt={conv.participant_name || 'Profile'}
+                          className="w-10 h-10 rounded-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none'
+                            ;(e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden')
+                          }}
+                        />
+                      ) : null}
+                      <div className={`w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 text-sm font-semibold ${conv.participant_profile_pic ? 'hidden' : ''}`}>
+                        {(conv.participant_name || conv.participant_username || '?')[0].toUpperCase()}
+                      </div>
+                    </div>
+                    {/* Name and Message */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm truncate">{conv.participant_name || conv.participant_username}</span>
+                        {conv.platform && (
+                          <span className="text-xs">{conv.platform === 'facebook' ? '📘' : '📷'}</span>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-500">@{conv.participant_username}</div>
+                      {conv.last_message && (
+                        <div className="text-xs text-gray-600 mt-1 truncate">{conv.last_message}</div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               ))
             )}
@@ -202,12 +240,40 @@ export default function Messages() {
             <>
               {/* Messages Header */}
               <div className="p-4 border-b border-gray-200">
-                <div className="font-semibold">
-                  {conversations.find(c => c.id === selectedConversation)?.participant_name}
-                </div>
-                <div className="text-xs text-gray-500">
-                  @{conversations.find(c => c.id === selectedConversation)?.participant_username}
-                </div>
+                {(() => {
+                  const conv = conversations.find(c => c.id === selectedConversation)
+                  return conv ? (
+                    <div className="flex items-center gap-3">
+                      {/* Profile Picture */}
+                      <div className="flex-shrink-0">
+                        {conv.participant_profile_pic ? (
+                          <img
+                            src={conv.participant_profile_pic}
+                            alt={conv.participant_name || 'Profile'}
+                            className="w-10 h-10 rounded-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none'
+                            }}
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 text-sm font-semibold">
+                            {(conv.participant_name || conv.participant_username || '?')[0].toUpperCase()}
+                          </div>
+                        )}
+                      </div>
+                      {/* Name and Platform */}
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold">{conv.participant_name || conv.participant_username}</span>
+                          {conv.platform && (
+                            <span className="text-sm">{conv.platform === 'facebook' ? '📘' : '📷'}</span>
+                          )}
+                        </div>
+                        <div className="text-xs text-gray-500">@{conv.participant_username}</div>
+                      </div>
+                    </div>
+                  ) : null
+                })()}
               </div>
 
               {/* Messages List */}
@@ -220,9 +286,75 @@ export default function Messages() {
                   <>
                     {messages.map(msg => (
                       <div key={msg.id} className={`flex ${msg.direction === 'outgoing' ? 'justify-end' : 'justify-start'}`}>
-                        <div className={`max-w-xs px-4 py-2 rounded-lg ${msg.direction === 'outgoing' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-900'}`}>
-                          <div className="text-sm">{msg.message_text}</div>
-                          <div className={`text-xs mt-1 ${msg.direction === 'outgoing' ? 'text-blue-100' : 'text-gray-500'}`}>
+                        <div className={`max-w-sm rounded-lg overflow-hidden ${msg.direction === 'outgoing' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-900'}`}>
+                          {/* Image Attachment */}
+                          {msg.attachment_url && (msg.message_type === 'image' || msg.attachment_type?.startsWith('image/')) && (
+                            <a href={msg.attachment_url} target="_blank" rel="noopener noreferrer">
+                              <img
+                                src={msg.attachment_url}
+                                alt="Image attachment"
+                                className="max-w-full max-h-64 object-contain cursor-pointer hover:opacity-90"
+                                onError={(e) => {
+                                  (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" fill="%23ccc"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23666">Image unavailable</text></svg>'
+                                }}
+                              />
+                            </a>
+                          )}
+
+                          {/* Video Attachment */}
+                          {msg.attachment_url && (msg.message_type === 'video' || msg.attachment_type?.startsWith('video/')) && (
+                            <video
+                              src={msg.attachment_url}
+                              controls
+                              className="max-w-full max-h-64"
+                              preload="metadata"
+                            >
+                              Your browser does not support video playback.
+                            </video>
+                          )}
+
+                          {/* Audio/Voice Note Attachment */}
+                          {msg.attachment_url && (msg.message_type === 'audio' || msg.attachment_type?.startsWith('audio/')) && (
+                            <div className="px-4 py-2">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="text-lg">🎤</span>
+                                <span className="text-xs font-medium">Voice Message</span>
+                              </div>
+                              <audio
+                                src={msg.attachment_url}
+                                controls
+                                className="w-full h-8"
+                                preload="metadata"
+                              >
+                                Your browser does not support audio playback.
+                              </audio>
+                            </div>
+                          )}
+
+                          {/* File Attachment */}
+                          {msg.attachment_url && msg.message_type === 'file' && !msg.attachment_type?.startsWith('image/') && !msg.attachment_type?.startsWith('video/') && !msg.attachment_type?.startsWith('audio/') && (
+                            <div className="px-4 py-2">
+                              <a
+                                href={msg.attachment_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className={`flex items-center gap-2 ${msg.direction === 'outgoing' ? 'text-blue-100 hover:text-white' : 'text-blue-600 hover:text-blue-800'}`}
+                              >
+                                <span className="text-lg">📎</span>
+                                <span className="text-sm underline">{msg.attachment_filename || 'Download File'}</span>
+                              </a>
+                            </div>
+                          )}
+
+                          {/* Text Content */}
+                          {(msg.message_text || msg.content) && (
+                            <div className="px-4 py-2">
+                              <div className="text-sm whitespace-pre-wrap">{msg.message_text || msg.content}</div>
+                            </div>
+                          )}
+
+                          {/* Timestamp */}
+                          <div className={`px-4 pb-2 text-xs ${msg.direction === 'outgoing' ? 'text-blue-100' : 'text-gray-500'}`}>
                             {formatTime(msg.created_at)}
                           </div>
                         </div>
