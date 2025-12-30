@@ -7,7 +7,7 @@ import httpx
 import logging
 
 from app.database import get_db
-from app.models import Message, ConnectedAccount, MessageDirection, MessageStatus, MessageType, ConversationParticipant, ConversationAISettings, Funnel
+from app.models import Message, ConnectedAccount, MessageDirection, MessageStatus, MessageType, ConversationParticipant, ConversationAISettings, Funnel, WorkspaceMember, User
 from app.schemas import MessageCreate, MessageResponse, ConversationResponse
 from app.services import FacebookService, InstagramService
 from pydantic import BaseModel
@@ -663,6 +663,10 @@ class MoveFunnelRequest(BaseModel):
     disable_auto_funnel: bool = True
 
 
+class AssignConversationRequest(BaseModel):
+    assigned_to_user_id: Optional[int] = None  # None to unassign
+
+
 @router.get("/conversations", response_model=List[Dict[str, Any]])
 async def get_conversations(
     workspace_id: int = Query(..., description="Workspace ID"),
@@ -704,6 +708,22 @@ async def get_conversations(
                 if funnel:
                     funnel_name = funnel.name
 
+            # Get assignment info
+            assigned_to = None
+            assigned_at = None
+            try:
+                if participant.assigned_to_user_id:
+                    assigned_user = db.query(User).filter(User.id == participant.assigned_to_user_id).first()
+                    if assigned_user:
+                        assigned_to = {
+                            "user_id": assigned_user.id,
+                            "username": assigned_user.username
+                        }
+                    assigned_at = participant.assigned_at.isoformat() if participant.assigned_at else None
+            except Exception:
+                # Handle case where column doesn't exist yet (before migration)
+                pass
+
             conversations.append({
                 "id": participant.conversation_id,
                 "participant_name": participant.participant_name,
@@ -712,7 +732,9 @@ async def get_conversations(
                 "platform": participant.platform,
                 "last_message": last_message.content if last_message else None,
                 "updated_at": last_message.created_at.isoformat() if last_message else participant.updated_at.isoformat(),
-                "current_funnel": funnel_name
+                "current_funnel": funnel_name,
+                "assigned_to": assigned_to,
+                "assigned_at": assigned_at
             })
 
         # Sort by most recent
@@ -993,3 +1015,119 @@ async def move_conversation_to_funnel(
         db.rollback()
         logger.error(f"Failed to move conversation to funnel: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to move conversation: {str(e)}")
+
+
+@router.post("/conversations/{conversation_id}/assign")
+async def assign_conversation(
+    conversation_id: str,
+    request: AssignConversationRequest,
+    workspace_id: int = Query(..., description="Workspace ID"),
+    user_id: int = Query(..., description="User making the assignment (must be owner/admin)"),
+    db: Session = Depends(get_db)
+):
+    """Assign a conversation to a workspace member"""
+    try:
+        # Verify user is owner or admin of the workspace
+        requester = db.query(WorkspaceMember).filter(
+            WorkspaceMember.workspace_id == workspace_id,
+            WorkspaceMember.user_id == user_id,
+            WorkspaceMember.role.in_(["owner", "admin"])
+        ).first()
+
+        if not requester:
+            raise HTTPException(status_code=403, detail="Only workspace owner/admin can assign conversations")
+
+        # Get conversation participant for this workspace
+        participant = db.query(ConversationParticipant).filter(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.workspace_id == workspace_id
+        ).first()
+
+        if not participant:
+            raise HTTPException(status_code=404, detail="Conversation not found in this workspace")
+
+        # If assigning (not unassigning), verify the target user is a member of the workspace
+        if request.assigned_to_user_id:
+            target_member = db.query(WorkspaceMember).filter(
+                WorkspaceMember.workspace_id == workspace_id,
+                WorkspaceMember.user_id == request.assigned_to_user_id
+            ).first()
+
+            if not target_member:
+                raise HTTPException(status_code=400, detail="Target user is not a member of this workspace")
+
+        # Update assignment
+        participant.assigned_to_user_id = request.assigned_to_user_id
+        participant.assigned_at = datetime.utcnow() if request.assigned_to_user_id else None
+
+        db.commit()
+
+        # Get assigned user info for response
+        assigned_to = None
+        if request.assigned_to_user_id:
+            assigned_user = db.query(User).filter(User.id == request.assigned_to_user_id).first()
+            if assigned_user:
+                assigned_to = {
+                    "user_id": assigned_user.id,
+                    "username": assigned_user.username
+                }
+
+        action = "assigned" if request.assigned_to_user_id else "unassigned"
+        logger.info(f"✅ Conversation {conversation_id} {action} to user {request.assigned_to_user_id}")
+
+        return {
+            "success": True,
+            "conversation_id": conversation_id,
+            "assigned_to": assigned_to,
+            "assigned_at": participant.assigned_at.isoformat() if participant.assigned_at else None
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Failed to assign conversation: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to assign conversation: {str(e)}")
+
+
+@router.get("/conversations/{conversation_id}/assignment")
+async def get_conversation_assignment(
+    conversation_id: str,
+    workspace_id: int = Query(..., description="Workspace ID"),
+    db: Session = Depends(get_db)
+):
+    """Get assignment details for a conversation"""
+    try:
+        # Get conversation participant
+        participant = db.query(ConversationParticipant).filter(
+            ConversationParticipant.conversation_id == conversation_id,
+            ConversationParticipant.workspace_id == workspace_id
+        ).first()
+
+        if not participant:
+            raise HTTPException(status_code=404, detail="Conversation not found in this workspace")
+
+        assigned_to = None
+        try:
+            if participant.assigned_to_user_id:
+                assigned_user = db.query(User).filter(User.id == participant.assigned_to_user_id).first()
+                if assigned_user:
+                    assigned_to = {
+                        "user_id": assigned_user.id,
+                        "username": assigned_user.username
+                    }
+        except Exception:
+            # Handle case where column doesn't exist yet
+            pass
+
+        return {
+            "conversation_id": conversation_id,
+            "assigned_to": assigned_to,
+            "assigned_at": participant.assigned_at.isoformat() if hasattr(participant, 'assigned_at') and participant.assigned_at else None
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get conversation assignment: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get assignment: {str(e)}")

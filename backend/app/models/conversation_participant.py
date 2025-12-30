@@ -23,6 +23,10 @@ class ConversationParticipant(Base):
     # AI Agent Configuration (nullable for backward compatibility before migration)
     ai_enabled = Column(Boolean, default=False, nullable=True)  # Toggle AI responses for this conversation
 
+    # Conversation Assignment - which workspace member is assigned to handle this conversation
+    assigned_to_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    assigned_at = Column(DateTime, nullable=True)  # When the assignment was made
+
     last_message_at = Column(DateTime, default=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

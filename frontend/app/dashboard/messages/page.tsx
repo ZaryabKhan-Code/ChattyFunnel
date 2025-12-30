@@ -36,6 +36,19 @@ interface Conversation {
   last_message?: string
   updated_at?: string
   platform?: string
+  assigned_to?: {
+    user_id: number
+    username: string
+  } | null
+  assigned_at?: string | null
+}
+
+interface WorkspaceMember {
+  id: number
+  user_id: number
+  workspace_id: number
+  role: string
+  username?: string
 }
 
 interface Message {
@@ -73,6 +86,11 @@ export default function Messages() {
   const [uploadingAttachment, setUploadingAttachment] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Assignment state
+  const [workspaceMembers, setWorkspaceMembers] = useState<WorkspaceMember[]>([])
+  const [showAssignDropdown, setShowAssignDropdown] = useState(false)
+  const [assigning, setAssigning] = useState(false)
+
   // Voice recording state
   const [isRecording, setIsRecording] = useState(false)
   const [recordingTime, setRecordingTime] = useState(0)
@@ -104,6 +122,7 @@ export default function Messages() {
     setUserId(parseInt(storedUserId))
     setWorkspaceId(parseInt(storedWorkspaceId))
     loadConversations(parseInt(storedWorkspaceId))
+    loadWorkspaceMembers(parseInt(storedWorkspaceId))
   }, [router])
 
   // Handle WebSocket messages
@@ -197,10 +216,59 @@ export default function Messages() {
     }
   }
 
+  const loadWorkspaceMembers = async (wid: number) => {
+    try {
+      const storedUserId = localStorage.getItem('userId')
+      if (!storedUserId) return
+
+      const response = await axios.get(`${API_URL}/workspaces/${wid}/members?user_id=${storedUserId}`)
+      setWorkspaceMembers(response.data)
+    } catch (error) {
+      console.error('Failed to load workspace members:', error)
+    }
+  }
+
+  const assignConversation = async (conversationId: string, assignToUserId: number | null) => {
+    if (!workspaceId || !userId) return
+
+    try {
+      setAssigning(true)
+      await axios.post(
+        `${API_URL}/messages/conversations/${conversationId}/assign?workspace_id=${workspaceId}&user_id=${userId}`,
+        { assigned_to_user_id: assignToUserId }
+      )
+
+      // Reload conversations to reflect the change
+      await loadConversations(workspaceId)
+      setShowAssignDropdown(false)
+    } catch (error: any) {
+      console.error('Failed to assign conversation:', error)
+      alert(error.response?.data?.detail || 'Failed to assign conversation')
+    } finally {
+      setAssigning(false)
+    }
+  }
+
   const handleSelectConversation = (conversationId: string) => {
     setSelectedConversation(conversationId)
+    setShowAssignDropdown(false)  // Close assignment dropdown when switching conversations
     loadMessages(conversationId)
   }
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (showAssignDropdown) {
+        const target = event.target as HTMLElement
+        if (!target.closest('.relative')) {
+          setShowAssignDropdown(false)
+        }
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showAssignDropdown])
 
   const handleSendMessage = async () => {
     if ((!messageInput.trim() && !attachment) || !selectedConversation || !workspaceId) return
@@ -419,6 +487,12 @@ export default function Messages() {
                         )}
                       </div>
                       <div className="text-xs text-gray-500">@{conv.participant_username}</div>
+                      {conv.assigned_to && (
+                        <div className="text-xs text-blue-600 mt-0.5 flex items-center gap-1">
+                          <span>👤</span>
+                          <span className="truncate">{conv.assigned_to.username}</span>
+                        </div>
+                      )}
                       {conv.last_message && (
                         <div className="text-xs text-gray-600 mt-1 truncate">{conv.last_message}</div>
                       )}
@@ -457,7 +531,7 @@ export default function Messages() {
                         )}
                       </div>
                       {/* Name and Platform */}
-                      <div>
+                      <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <span className="font-semibold">{conv.participant_name || conv.participant_username}</span>
                           {conv.platform && (
@@ -465,6 +539,66 @@ export default function Messages() {
                           )}
                         </div>
                         <div className="text-xs text-gray-500">@{conv.participant_username}</div>
+                      </div>
+
+                      {/* Assignment Dropdown */}
+                      <div className="relative">
+                        <button
+                          onClick={() => setShowAssignDropdown(!showAssignDropdown)}
+                          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm transition-colors ${
+                            conv.assigned_to
+                              ? 'bg-blue-100 text-blue-700 hover:bg-blue-200'
+                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                          }`}
+                        >
+                          <span>👤</span>
+                          <span>{conv.assigned_to ? conv.assigned_to.username : 'Assign'}</span>
+                          <span className="text-xs">▼</span>
+                        </button>
+
+                        {showAssignDropdown && (
+                          <div className="absolute right-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
+                            <div className="py-1">
+                              {/* Unassign option */}
+                              {conv.assigned_to && (
+                                <button
+                                  onClick={() => assignConversation(conv.id, null)}
+                                  disabled={assigning}
+                                  className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+                                >
+                                  {assigning ? 'Removing...' : '❌ Remove Assignment'}
+                                </button>
+                              )}
+
+                              {/* Workspace members */}
+                              {workspaceMembers.length > 0 && (
+                                <>
+                                  <div className="px-4 py-1 text-xs text-gray-400 uppercase">Assign to</div>
+                                  {workspaceMembers.map(member => (
+                                    <button
+                                      key={member.user_id}
+                                      onClick={() => assignConversation(conv.id, member.user_id)}
+                                      disabled={assigning || conv.assigned_to?.user_id === member.user_id}
+                                      className={`w-full text-left px-4 py-2 text-sm hover:bg-gray-50 disabled:opacity-50 ${
+                                        conv.assigned_to?.user_id === member.user_id
+                                          ? 'bg-blue-50 text-blue-700'
+                                          : 'text-gray-700'
+                                      }`}
+                                    >
+                                      <span className="mr-2">{member.role === 'owner' ? '👑' : member.role === 'admin' ? '⭐' : '👤'}</span>
+                                      {member.username}
+                                      {conv.assigned_to?.user_id === member.user_id && ' ✓'}
+                                    </button>
+                                  ))}
+                                </>
+                              )}
+
+                              {workspaceMembers.length === 0 && (
+                                <div className="px-4 py-2 text-sm text-gray-400">No members found</div>
+                              )}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   ) : null
