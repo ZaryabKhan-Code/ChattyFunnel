@@ -676,8 +676,7 @@ async def get_conversations(
 ):
     """Get all conversations for a workspace"""
     try:
-        # First, get active platforms for this workspace
-        # Only show conversations from platforms that have ACTIVE accounts
+        # Get active platforms for this workspace (to mark conversations as active/disabled)
         active_platforms = db.query(ConnectedAccount.platform).filter(
             ConnectedAccount.workspace_id == workspace_id,
             ConnectedAccount.is_active == True,
@@ -686,14 +685,16 @@ async def get_conversations(
 
         logger.info(f"Active platforms for workspace {workspace_id}: {active_platform_list}")
 
-        # Get all participants for this workspace, but only for active platforms
+        # Get ALL participants for this workspace (show disabled conversations too)
         participants = db.query(ConversationParticipant).filter(
-            ConversationParticipant.workspace_id == workspace_id,
-            ConversationParticipant.platform.in_(active_platform_list)
+            ConversationParticipant.workspace_id == workspace_id
         ).all()
 
         conversations = []
         for participant in participants:
+            # Check if the platform's account is active
+            is_account_active = participant.platform in active_platform_list
+
             # Get last message for this conversation
             last_message = db.query(Message).filter(
                 Message.conversation_id == participant.conversation_id
@@ -736,7 +737,8 @@ async def get_conversations(
                 "updated_at": last_message.created_at.isoformat() if last_message else participant.updated_at.isoformat(),
                 "current_funnel": funnel_name,
                 "assigned_to": assigned_to,
-                "assigned_at": assigned_at
+                "assigned_at": assigned_at,
+                "is_active": is_account_active,  # False if account is disconnected
             })
 
         # Sort by most recent

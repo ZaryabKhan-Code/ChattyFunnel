@@ -41,6 +41,7 @@ interface Conversation {
     username: string
   } | null
   assigned_at?: string | null
+  is_active?: boolean  // False if account is disconnected
 }
 
 interface WorkspaceMember {
@@ -457,8 +458,12 @@ export default function Messages() {
               conversations.map(conv => (
                 <div
                   key={conv.id}
-                  onClick={() => handleSelectConversation(conv.id)}
-                  className={`p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${selectedConversation === conv.id ? 'bg-blue-50' : ''}`}
+                  onClick={() => conv.is_active !== false && handleSelectConversation(conv.id)}
+                  className={`p-4 border-b border-gray-100 ${
+                    conv.is_active === false
+                      ? 'opacity-50 cursor-not-allowed bg-gray-50'
+                      : `cursor-pointer hover:bg-gray-50 ${selectedConversation === conv.id ? 'bg-blue-50' : ''}`
+                  }`}
                 >
                   <div className="flex items-center gap-3">
                     {/* Profile Picture with proper fallback */}
@@ -484,6 +489,9 @@ export default function Messages() {
                         <span className="font-semibold text-sm truncate">{conv.participant_name || conv.participant_username}</span>
                         {conv.platform && (
                           <span className="text-xs">{conv.platform === 'facebook' ? '📘' : '📷'}</span>
+                        )}
+                        {conv.is_active === false && (
+                          <span className="text-xs px-1.5 py-0.5 bg-red-100 text-red-600 rounded">Disconnected</span>
                         )}
                       </div>
                       <div className="text-xs text-gray-500">@{conv.participant_username}</div>
