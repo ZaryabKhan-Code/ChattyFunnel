@@ -861,6 +861,18 @@ async def send_message_endpoint(
                 attachment_type=request.attachment_type
             )
 
+        # Determine message type based on attachment
+        msg_type = MessageType.TEXT
+        if request.attachment_url and request.attachment_type:
+            if request.attachment_type.startswith('image/'):
+                msg_type = MessageType.IMAGE
+            elif request.attachment_type.startswith('video/'):
+                msg_type = MessageType.VIDEO
+            elif request.attachment_type.startswith('audio/'):
+                msg_type = MessageType.AUDIO
+            else:
+                msg_type = MessageType.FILE
+
         # Save message to database
         message = Message(
             user_id=account.user_id,
@@ -870,10 +882,11 @@ async def send_message_endpoint(
             sender_id=account.platform_user_id,
             recipient_id=participant.participant_id,
             content=request.message_text,
-            message_type=MessageType.TEXT if not request.attachment_url else MessageType.IMAGE,
+            message_type=msg_type,
             direction=MessageDirection.OUTGOING,
             status=MessageStatus.SENT,
-            attachment_url=request.attachment_url
+            attachment_url=request.attachment_url,
+            attachment_type=request.attachment_type
         )
         db.add(message)
         db.commit()

@@ -51,6 +51,12 @@ interface Message {
   attachment_filename?: string
 }
 
+interface AttachmentPreview {
+  file: File
+  url: string
+  type: 'image' | 'video' | 'audio' | 'file'
+}
+
 export default function Messages() {
   const [userId, setUserId] = useState<number | null>(null)
   const [workspaceId, setWorkspaceId] = useState<number | null>(null)
@@ -61,6 +67,18 @@ export default function Messages() {
   const [loading, setLoading] = useState(false)
   const router = useRouter()
   const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Attachment state
+  const [attachment, setAttachment] = useState<AttachmentPreview | null>(null)
+  const [uploadingAttachment, setUploadingAttachment] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Voice recording state
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordingTime, setRecordingTime] = useState(0)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
+  const recordingTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   // Auto-scroll to bottom when new messages arrive
   const scrollToBottom = () => {
@@ -185,21 +203,139 @@ export default function Messages() {
   }
 
   const handleSendMessage = async () => {
-    if (!messageInput.trim() || !selectedConversation || !workspaceId) return
+    if ((!messageInput.trim() && !attachment) || !selectedConversation || !workspaceId) return
 
     try {
+      let attachmentUrl: string | undefined
+      let attachmentType: string | undefined
+
+      // Upload attachment first if present
+      if (attachment) {
+        setUploadingAttachment(true)
+        try {
+          const formData = new FormData()
+          formData.append('file', attachment.file)
+
+          const uploadResponse = await axios.post(
+            `${API_URL}/attachments/upload?user_id=${userId}&is_voice_note=${attachment.type === 'audio'}`,
+            formData,
+            { headers: { 'Content-Type': 'multipart/form-data' } }
+          )
+
+          attachmentUrl = uploadResponse.data.file_url
+          attachmentType = uploadResponse.data.mime_type
+          console.log('Attachment uploaded:', attachmentUrl)
+        } catch (uploadError: any) {
+          console.error('Failed to upload attachment:', uploadError)
+          alert(uploadError.response?.data?.detail || 'Failed to upload attachment')
+          setUploadingAttachment(false)
+          return
+        }
+        setUploadingAttachment(false)
+      }
+
+      // Send message with or without attachment
       await axios.post(`${API_URL}/messages/messages/send`, {
         conversation_id: selectedConversation,
         workspace_id: workspaceId,
-        message_text: messageInput
+        message_text: messageInput || '',
+        attachment_url: attachmentUrl,
+        attachment_type: attachmentType
       })
 
       setMessageInput('')
+      setAttachment(null)
       loadMessages(selectedConversation)
       if (workspaceId) loadConversations(workspaceId)
     } catch (error: any) {
       alert(error.response?.data?.detail || 'Failed to send message')
     }
+  }
+
+  // Handle file selection
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Determine file type
+    let type: AttachmentPreview['type'] = 'file'
+    if (file.type.startsWith('image/')) type = 'image'
+    else if (file.type.startsWith('video/')) type = 'video'
+    else if (file.type.startsWith('audio/')) type = 'audio'
+
+    // Create preview URL
+    const url = URL.createObjectURL(file)
+
+    setAttachment({ file, url, type })
+
+    // Reset input
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
+  // Clear attachment
+  const clearAttachment = () => {
+    if (attachment) {
+      URL.revokeObjectURL(attachment.url)
+      setAttachment(null)
+    }
+  }
+
+  // Voice recording functions
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+
+      audioChunksRef.current = []
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          audioChunksRef.current.push(e.data)
+        }
+      }
+
+      mediaRecorder.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        const audioFile = new File([audioBlob], `voice_note_${Date.now()}.webm`, { type: 'audio/webm' })
+        const url = URL.createObjectURL(audioBlob)
+
+        setAttachment({ file: audioFile, url, type: 'audio' })
+
+        // Stop all tracks
+        stream.getTracks().forEach(track => track.stop())
+      }
+
+      mediaRecorderRef.current = mediaRecorder
+      mediaRecorder.start()
+      setIsRecording(true)
+      setRecordingTime(0)
+
+      // Start timer
+      recordingTimerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1)
+      }, 1000)
+    } catch (error) {
+      console.error('Failed to start recording:', error)
+      alert('Could not access microphone. Please allow microphone access.')
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+
+      if (recordingTimerRef.current) {
+        clearInterval(recordingTimerRef.current)
+        recordingTimerRef.current = null
+      }
+    }
+  }
+
+  const formatRecordingTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60)
+    const secs = seconds % 60
+    return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
   const formatTime = (timestamp: string) => {
@@ -419,20 +555,98 @@ export default function Messages() {
 
               {/* Message Input */}
               <div className="p-4 border-t border-gray-200">
-                <div className="flex gap-2">
+                {/* Attachment Preview */}
+                {attachment && (
+                  <div className="mb-3 p-3 bg-gray-50 rounded-lg relative">
+                    <button
+                      onClick={clearAttachment}
+                      className="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center text-sm hover:bg-red-600"
+                    >
+                      ×
+                    </button>
+                    {attachment.type === 'image' && (
+                      <img src={attachment.url} alt="Preview" className="max-h-32 rounded" />
+                    )}
+                    {attachment.type === 'video' && (
+                      <video src={attachment.url} className="max-h-32 rounded" controls />
+                    )}
+                    {attachment.type === 'audio' && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-lg">🎤</span>
+                        <audio src={attachment.url} controls className="h-8" />
+                      </div>
+                    )}
+                    {attachment.type === 'file' && (
+                      <div className="flex items-center gap-2 text-gray-600">
+                        <span className="text-lg">📎</span>
+                        <span className="text-sm">{attachment.file.name}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Recording Indicator */}
+                {isRecording && (
+                  <div className="mb-3 p-3 bg-red-50 rounded-lg flex items-center gap-3">
+                    <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                    <span className="text-red-600 font-medium">Recording... {formatRecordingTime(recordingTime)}</span>
+                    <button
+                      onClick={stopRecording}
+                      className="ml-auto px-3 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600"
+                    >
+                      Stop
+                    </button>
+                  </div>
+                )}
+
+                <div className="flex gap-2 items-center">
+                  {/* Hidden File Input */}
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileSelect}
+                    accept="image/*,video/*,audio/*,.pdf,.doc,.docx"
+                    className="hidden"
+                  />
+
+                  {/* Attachment Button */}
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isRecording || uploadingAttachment}
+                    className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg disabled:opacity-50"
+                    title="Attach file"
+                  >
+                    📎
+                  </button>
+
+                  {/* Voice Note Button */}
+                  <button
+                    onClick={isRecording ? stopRecording : startRecording}
+                    disabled={uploadingAttachment || !!attachment}
+                    className={`p-2 rounded-lg ${isRecording ? 'text-red-500 bg-red-50' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'} disabled:opacity-50`}
+                    title={isRecording ? "Stop recording" : "Record voice note"}
+                  >
+                    🎤
+                  </button>
+
+                  {/* Text Input */}
                   <input
                     type="text"
                     value={messageInput}
                     onChange={(e) => setMessageInput(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                    placeholder="Type a message..."
-                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    onKeyPress={(e) => e.key === 'Enter' && !isRecording && handleSendMessage()}
+                    placeholder={attachment ? "Add a caption..." : "Type a message..."}
+                    disabled={isRecording}
+                    className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
                   />
+
+                  {/* Send Button */}
                   <button
                     onClick={handleSendMessage}
-                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    disabled={isRecording || uploadingAttachment || (!messageInput.trim() && !attachment)}
+                    className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    Send
+                    {uploadingAttachment ? '...' : 'Send'}
                   </button>
                 </div>
               </div>
