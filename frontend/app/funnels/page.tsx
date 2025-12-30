@@ -58,9 +58,14 @@ export default function FunnelsPage() {
       // Load conversations
       const convsRes = await axios.get(`${API_URL}/messages/conversations?workspace_id=${wid}`)
 
+      // Deduplicate conversations by ID before processing
+      const uniqueConvs = Array.from(
+        new Map(convsRes.data.map((c: any) => [c.id, c])).values()
+      )
+
       // Get funnel assignment for each conversation
       const conversationsWithFunnels = await Promise.all(
-        convsRes.data.map(async (conv: any) => {
+        uniqueConvs.map(async (conv: any) => {
           try {
             const settingsRes = await axios.get(`${API_URL}/messages/conversations/${conv.id}/ai-settings`)
             return { ...conv, funnel_id: settingsRes.data.funnel_id }

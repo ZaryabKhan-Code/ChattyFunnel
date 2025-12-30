@@ -70,7 +70,12 @@ export default function Messages() {
       console.log('Loading conversations for workspace:', wid)
       const response = await axios.get(`${API_URL}/messages/conversations?workspace_id=${wid}`)
       console.log('Loaded conversations:', response.data)
-      setConversations(response.data)
+
+      // Deduplicate conversations by ID to prevent duplicate key warnings
+      const uniqueConversations = Array.from(
+        new Map(response.data.map((c: Conversation) => [c.id, c])).values()
+      )
+      setConversations(uniqueConversations)
 
       if (response.data.length === 0) {
         console.warn('No conversations found for workspace', wid)
@@ -85,7 +90,12 @@ export default function Messages() {
     try {
       setLoading(true)
       const response = await axios.get(`${API_URL}/messages/conversations/${conversationId}/messages`)
-      setMessages(response.data)
+
+      // Deduplicate messages by ID to prevent duplicate key warnings
+      const uniqueMessages = Array.from(
+        new Map(response.data.map((m: Message) => [m.id, m])).values()
+      )
+      setMessages(uniqueMessages)
     } catch (error) {
       console.error('Failed to load messages:', error)
     } finally {
