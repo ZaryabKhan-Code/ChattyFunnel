@@ -370,6 +370,34 @@ async def facebook_callback(
 
         logger.info(f"Auto-sync completed. Total messages synced: {total_synced}")
 
+        # Auto-sync Instagram conversations for Facebook page-linked Instagram accounts
+        logger.info("Starting auto-sync of Instagram conversations...")
+        ig_synced = 0
+        for page in pages:
+            try:
+                # Get the Instagram account linked to this page
+                ig_account = (
+                    db.query(ConnectedAccount)
+                    .filter(
+                        ConnectedAccount.user_id == user.id,
+                        ConnectedAccount.platform == "instagram",
+                        ConnectedAccount.page_id == page["id"],
+                        ConnectedAccount.is_active == True,
+                    )
+                    .first()
+                )
+
+                if ig_account:
+                    logger.info(f"Syncing conversations for Instagram @{ig_account.platform_username}...")
+                    synced_count = await sync_account_messages(db, ig_account)
+                    ig_synced += synced_count
+                    logger.info(f"Synced {synced_count} messages from Instagram @{ig_account.platform_username}")
+            except Exception as sync_error:
+                # Don't fail the OAuth flow if sync fails
+                logger.error(f"Failed to auto-sync Instagram for page {page['id']}: {sync_error}")
+
+        logger.info(f"Instagram auto-sync completed. Total messages synced: {ig_synced}")
+
         # Redirect to frontend success page
         from app.config import settings
         redirect_url = f"{settings.FRONTEND_URL}/dashboard?success=facebook"
