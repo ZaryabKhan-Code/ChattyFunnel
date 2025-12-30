@@ -79,8 +79,9 @@ async def fetch_sender_info(sender_id: str, access_token: str, platform: str) ->
             url = f"https://graph.facebook.com/v18.0/{sender_id}"
             logger.info("🔑 Using Facebook Graph API endpoint for sender info")
 
+        # Instagram uses profile_picture_url, not profile_pic
         params = {
-            "fields": "id,name,username,profile_pic",
+            "fields": "id,name,username,profile_picture_url",
             "access_token": access_token
         }
 
@@ -97,11 +98,12 @@ async def fetch_sender_info(sender_id: str, access_token: str, platform: str) ->
                 data = response.json()
                 logger.info(f"👤 Sender data received: {data}")
 
-                # Extract available fields
+                # Extract available fields - Instagram uses profile_picture_url, Facebook uses profile_pic
+                profile_pic = data.get("profile_pic") or data.get("profile_picture_url")
                 result = {
                     "name": data.get("name") or data.get("username") or "User",
                     "username": data.get("username") or data.get("first_name") or sender_id,
-                    "profile_pic": data.get("profile_pic")
+                    "profile_pic": profile_pic
                 }
                 logger.info(f"👤 Parsed sender info: {result}")
                 return result
