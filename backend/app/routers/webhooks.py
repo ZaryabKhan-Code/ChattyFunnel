@@ -515,11 +515,11 @@ async def handle_facebook_message(event: Dict[str, Any], db: Session):
                                 "id": db_message.id,
                                 "content": message_text,
                                 "sender_id": sender_id,
-                                "sender_name": sender_info.get("name"),
+                                "sender_name": user_info.get("name") if not is_echo else None,
                                 "message_type": message_type.value,
                                 "attachment_url": attachment_url,
                                 "created_at": db_message.created_at.isoformat(),
-                                "direction": "incoming"
+                                "direction": "outgoing" if is_echo else "incoming"
                             }
                         }
                     )
@@ -878,11 +878,11 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                                 "id": db_message.id,
                                 "content": message_text,
                                 "sender_id": sender_id,
-                                "sender_name": sender_info.get("name"),
+                                "sender_name": user_info.get("name") if not is_echo else None,
                                 "message_type": message_type.value,
                                 "attachment_url": attachment_url,
                                 "created_at": db_message.created_at.isoformat(),
-                                "direction": "incoming"
+                                "direction": "outgoing" if is_echo else "incoming"
                             }
                         }
                     )
