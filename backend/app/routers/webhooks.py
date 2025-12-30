@@ -393,18 +393,26 @@ async def handle_facebook_message(event: Dict[str, Any], db: Session):
         logger.info(f"Message text: {message_text}")
         logger.info(f"Is echo: {is_echo}")
 
-        # Skip echo messages (messages sent by the page itself)
+        # For echo messages, sender is the page, recipient is the user
+        # For regular messages, sender is the user, recipient is the page
         if is_echo:
-            logger.info("Skipping echo message (sent by page)")
-            return
+            page_id = sender_id
+            user_psid = recipient_id
+            direction = MessageDirection.OUTGOING
+            logger.info(f"Processing echo message (sent by page {page_id} to user {user_psid})")
+        else:
+            page_id = recipient_id
+            user_psid = sender_id
+            direction = MessageDirection.INCOMING
+            logger.info(f"Processing incoming message (from user {user_psid} to page {page_id})")
 
-        # Find the connected account
-        logger.info(f"Looking for connected account with page_id: {recipient_id}")
+        # Find the connected account using page_id
+        logger.info(f"Looking for connected account with page_id: {page_id}")
         account = (
             db.query(ConnectedAccount)
             .filter(
                 ConnectedAccount.platform == "facebook",
-                ConnectedAccount.page_id == recipient_id,
+                ConnectedAccount.page_id == page_id,
                 ConnectedAccount.is_active == True,
             )
             .first()
@@ -422,12 +430,12 @@ async def handle_facebook_message(event: Dict[str, Any], db: Session):
                 return
 
             if not existing:
-                logger.info(f"💾 Saving new message to database")
-                # Create stable conversation ID
-                conv_id = create_stable_conversation_id("facebook", account.user_id, sender_id)
+                logger.info(f"💾 Saving new Facebook message to database (direction: {direction})")
+                # Create stable conversation ID using the user's PSID (not the page)
+                conv_id = create_stable_conversation_id("facebook", account.user_id, user_psid)
 
-                # Fetch sender information
-                sender_info = await fetch_sender_info(sender_id, account.access_token, "facebook")
+                # Fetch user information (the person chatting with the page)
+                user_info = await fetch_sender_info(user_psid, account.access_token, "facebook")
 
                 # Update or create conversation participant
                 participant = db.query(ConversationParticipant).filter(
@@ -438,11 +446,11 @@ async def handle_facebook_message(event: Dict[str, Any], db: Session):
                     participant = ConversationParticipant(
                         conversation_id=conv_id,
                         platform="facebook",
-                        platform_conversation_id=sender_id,
-                        participant_id=sender_id,
-                        participant_name=sender_info.get("name"),
-                        participant_username=sender_info.get("username"),
-                        participant_profile_pic=sender_info.get("profile_pic"),
+                        platform_conversation_id=user_psid,
+                        participant_id=user_psid,
+                        participant_name=user_info.get("name"),
+                        participant_username=user_info.get("username"),
+                        participant_profile_pic=user_info.get("profile_pic"),
                         user_id=account.user_id,
                         workspace_id=account.workspace_id,
                         last_message_at=datetime.utcnow(),
@@ -450,9 +458,12 @@ async def handle_facebook_message(event: Dict[str, Any], db: Session):
                     db.add(participant)
                 else:
                     # Update participant info and last message time
-                    participant.participant_name = sender_info.get("name")
-                    participant.participant_username = sender_info.get("username")
-                    participant.participant_profile_pic = sender_info.get("profile_pic")
+                    if user_info.get("name"):
+                        participant.participant_name = user_info.get("name")
+                    if user_info.get("username"):
+                        participant.participant_username = user_info.get("username")
+                    if user_info.get("profile_pic"):
+                        participant.participant_profile_pic = user_info.get("profile_pic")
                     participant.last_message_at = datetime.utcnow()
                     # Fix missing workspace_id for existing participants
                     if not participant.workspace_id and account.workspace_id:
@@ -471,7 +482,7 @@ async def handle_facebook_message(event: Dict[str, Any], db: Session):
                     attachment_type = attachment_data.get("content_type")
                     attachment_filename = attachment_data.get("filename")
 
-                # Save incoming message
+                # Save message with correct direction
                 db_message = Message(
                     user_id=account.user_id,
                     platform="facebook",
@@ -479,7 +490,7 @@ async def handle_facebook_message(event: Dict[str, Any], db: Session):
                     message_id=message_id,
                     sender_id=sender_id,
                     recipient_id=recipient_id,
-                    direction=MessageDirection.INCOMING,
+                    direction=direction,
                     message_type=message_type,
                     content=message_text,
                     attachment_url=attachment_url,
@@ -683,23 +694,31 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
         logger.info(f"Message text: {message_text}")
         logger.info(f"Is echo: {is_echo}")
 
-        # Skip echo messages (messages sent by the page itself)
+        # For echo messages, sender is the Instagram account, recipient is the user
+        # For regular messages, sender is the user, recipient is the Instagram account
         if is_echo:
-            logger.info("Skipping Instagram echo message (sent by page)")
-            return
+            ig_account_id = sender_id
+            user_ig_id = recipient_id
+            direction = MessageDirection.OUTGOING
+            logger.info(f"Processing Instagram echo message (sent by account {ig_account_id} to user {user_ig_id})")
+        else:
+            ig_account_id = recipient_id
+            user_ig_id = sender_id
+            direction = MessageDirection.INCOMING
+            logger.info(f"Processing Instagram incoming message (from user {user_ig_id} to account {ig_account_id})")
 
-        # Find the connected account
+        # Find the connected account using ig_account_id
         # Support both Instagram connection types:
-        # - Instagram Business Login: recipient_id matches platform_user_id (Instagram Account ID)
-        # - Facebook Page-managed Instagram: recipient_id matches platform_user_id (Instagram Account ID)
-        logger.info(f"Looking for Instagram connected account with recipient_id: {recipient_id}")
+        # - Instagram Business Login: ig_account_id matches platform_user_id (Instagram Account ID)
+        # - Facebook Page-managed Instagram: ig_account_id matches platform_user_id (Instagram Account ID)
+        logger.info(f"Looking for Instagram connected account with ig_account_id: {ig_account_id}")
 
         # Try platform_user_id first (should match Instagram Account ID)
         account = (
             db.query(ConnectedAccount)
             .filter(
                 ConnectedAccount.platform == "instagram",
-                ConnectedAccount.platform_user_id == recipient_id,
+                ConnectedAccount.platform_user_id == ig_account_id,
                 ConnectedAccount.is_active == True,
             )
             .first()
@@ -712,7 +731,7 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                 db.query(ConnectedAccount)
                 .filter(
                     ConnectedAccount.platform == "instagram",
-                    ConnectedAccount.page_id == recipient_id,
+                    ConnectedAccount.page_id == ig_account_id,
                     ConnectedAccount.is_active == True,
                 )
                 .first()
@@ -748,7 +767,7 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                         if response.status_code == 200:
                             instagram_account_id = response.json().get("id")
 
-                            if instagram_account_id == recipient_id:
+                            if instagram_account_id == ig_account_id:
                                 logger.info(f"✅ Found matching Instagram Business Login account: {igaal_account.id}")
                                 logger.info(f"🔧 Auto-fixing database: setting platform_user_id to {instagram_account_id}")
 
@@ -774,12 +793,12 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                 return
 
             if not existing:
-                logger.info(f"💾 Saving new Instagram message to database")
-                # Create stable conversation ID
-                conv_id = create_stable_conversation_id("instagram", account.user_id, sender_id)
+                logger.info(f"💾 Saving new Instagram message to database (direction: {direction})")
+                # Create stable conversation ID using the user's Instagram ID (not the page)
+                conv_id = create_stable_conversation_id("instagram", account.user_id, user_ig_id)
 
-                # Fetch sender information
-                sender_info = await fetch_sender_info(sender_id, account.access_token, "instagram")
+                # Fetch user information (the person chatting with the account)
+                user_info = await fetch_sender_info(user_ig_id, account.access_token, "instagram")
 
                 # Update or create conversation participant
                 participant = db.query(ConversationParticipant).filter(
@@ -790,21 +809,24 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                     participant = ConversationParticipant(
                         conversation_id=conv_id,
                         platform="instagram",
-                        platform_conversation_id=sender_id,
-                        participant_id=sender_id,
-                        participant_name=sender_info.get("name"),
-                        participant_username=sender_info.get("username"),
-                        participant_profile_pic=sender_info.get("profile_pic"),
+                        platform_conversation_id=user_ig_id,
+                        participant_id=user_ig_id,
+                        participant_name=user_info.get("name"),
+                        participant_username=user_info.get("username"),
+                        participant_profile_pic=user_info.get("profile_pic"),
                         user_id=account.user_id,
                         workspace_id=account.workspace_id,
                         last_message_at=datetime.utcnow(),
                     )
                     db.add(participant)
                 else:
-                    # Update participant info and last message time
-                    participant.participant_name = sender_info.get("name")
-                    participant.participant_username = sender_info.get("username")
-                    participant.participant_profile_pic = sender_info.get("profile_pic")
+                    # Update participant info and last message time (only if we got valid info)
+                    if user_info.get("name"):
+                        participant.participant_name = user_info.get("name")
+                    if user_info.get("username"):
+                        participant.participant_username = user_info.get("username")
+                    if user_info.get("profile_pic"):
+                        participant.participant_profile_pic = user_info.get("profile_pic")
                     participant.last_message_at = datetime.utcnow()
                     # Fix missing workspace_id for existing participants
                     if not participant.workspace_id and account.workspace_id:
@@ -823,7 +845,7 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                     attachment_type = attachment_data.get("content_type")
                     attachment_filename = attachment_data.get("filename")
 
-                # Save incoming message
+                # Save message with correct direction
                 db_message = Message(
                     user_id=account.user_id,
                     platform="instagram",
@@ -831,7 +853,7 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                     message_id=message_id,
                     sender_id=sender_id,
                     recipient_id=recipient_id,
-                    direction=MessageDirection.INCOMING,
+                    direction=direction,
                     message_type=message_type,
                     content=message_text,
                     attachment_url=attachment_url,
