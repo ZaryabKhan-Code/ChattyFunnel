@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import axios from 'axios'
+import { useWebSocketContext } from '@/contexts/WebSocketContext'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://roamifly-admin-b97e90c67026.herokuapp.com/api'
 
@@ -12,6 +13,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false)
   const [isLogin, setIsLogin] = useState(false)
   const router = useRouter()
+  const { connect } = useWebSocketContext()
 
   const handleCreateAccount = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -24,6 +26,8 @@ export default function Home() {
       })
 
       localStorage.setItem('userId', response.data.id.toString())
+      // Connect WebSocket after successful login
+      connect()
       router.push('/workspace-setup')
     } catch (error: any) {
       alert(error.response?.data?.detail || 'Failed to create account')
@@ -42,6 +46,8 @@ export default function Home() {
 
       if (response.data) {
         localStorage.setItem('userId', userId)
+        // Connect WebSocket after successful login
+        connect()
         router.push('/workspace-setup')
       }
     } catch (error: any) {

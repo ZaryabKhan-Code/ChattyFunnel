@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import DashboardLayout from '@/components/DashboardLayout'
-import { useWebSocket } from '@/hooks/useWebSocket'
+import { useWebSocketContext } from '@/contexts/WebSocketContext'
 import axios from 'axios'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://roamifly-admin-b97e90c67026.herokuapp.com/api'
@@ -51,8 +51,8 @@ export default function Messages() {
     scrollToBottom()
   }, [messages])
 
-  // WebSocket hook
-  const { isConnected, lastMessage, sendMessage: wsSendMessage } = useWebSocket(userId)
+  // WebSocket context - connection is managed globally
+  const { isConnected, lastMessage, sendMessage: wsSendMessage } = useWebSocketContext()
 
   useEffect(() => {
     const storedUserId = localStorage.getItem('userId')
@@ -213,22 +213,22 @@ export default function Messages() {
                   className={`p-4 border-b border-gray-100 cursor-pointer hover:bg-gray-50 ${selectedConversation === conv.id ? 'bg-blue-50' : ''}`}
                 >
                   <div className="flex items-center gap-3">
-                    {/* Profile Picture */}
-                    <div className="flex-shrink-0">
-                      {conv.participant_profile_pic ? (
+                    {/* Profile Picture with proper fallback */}
+                    <div className="flex-shrink-0 relative">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-sm font-semibold">
+                        {(conv.participant_name || conv.participant_username || '?')[0].toUpperCase()}
+                      </div>
+                      {conv.participant_profile_pic && (
                         <img
                           src={conv.participant_profile_pic}
                           alt={conv.participant_name || 'Profile'}
-                          className="w-10 h-10 rounded-full object-cover"
+                          className="w-10 h-10 rounded-full object-cover absolute inset-0"
                           onError={(e) => {
+                            // Hide image on error, fallback avatar is already visible underneath
                             (e.target as HTMLImageElement).style.display = 'none'
-                            ;(e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden')
                           }}
                         />
-                      ) : null}
-                      <div className={`w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 text-sm font-semibold ${conv.participant_profile_pic ? 'hidden' : ''}`}>
-                        {(conv.participant_name || conv.participant_username || '?')[0].toUpperCase()}
-                      </div>
+                      )}
                     </div>
                     {/* Name and Message */}
                     <div className="flex-1 min-w-0">
@@ -260,21 +260,20 @@ export default function Messages() {
                   const conv = conversations.find(c => c.id === selectedConversation)
                   return conv ? (
                     <div className="flex items-center gap-3">
-                      {/* Profile Picture */}
-                      <div className="flex-shrink-0">
-                        {conv.participant_profile_pic ? (
+                      {/* Profile Picture with proper fallback */}
+                      <div className="flex-shrink-0 relative">
+                        <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-400 to-purple-500 flex items-center justify-center text-white text-sm font-semibold">
+                          {(conv.participant_name || conv.participant_username || '?')[0].toUpperCase()}
+                        </div>
+                        {conv.participant_profile_pic && (
                           <img
                             src={conv.participant_profile_pic}
                             alt={conv.participant_name || 'Profile'}
-                            className="w-10 h-10 rounded-full object-cover"
+                            className="w-10 h-10 rounded-full object-cover absolute inset-0"
                             onError={(e) => {
                               (e.target as HTMLImageElement).style.display = 'none'
                             }}
                           />
-                        ) : (
-                          <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center text-gray-600 text-sm font-semibold">
-                            {(conv.participant_name || conv.participant_username || '?')[0].toUpperCase()}
-                          </div>
                         )}
                       </div>
                       {/* Name and Platform */}
@@ -305,16 +304,33 @@ export default function Messages() {
                         <div className={`max-w-sm rounded-lg overflow-hidden ${msg.direction === 'outgoing' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-900'}`}>
                           {/* Image Attachment */}
                           {msg.attachment_url && (msg.message_type === 'image' || msg.attachment_type?.startsWith('image/')) && (
-                            <a href={msg.attachment_url} target="_blank" rel="noopener noreferrer">
-                              <img
-                                src={msg.attachment_url}
-                                alt="Image attachment"
-                                className="max-w-full max-h-64 object-contain cursor-pointer hover:opacity-90"
-                                onError={(e) => {
-                                  (e.target as HTMLImageElement).src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100" fill="%23ccc"><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="%23666">Image unavailable</text></svg>'
-                                }}
-                              />
-                            </a>
+                            <div className="relative">
+                              <a href={msg.attachment_url} target="_blank" rel="noopener noreferrer">
+                                <img
+                                  src={msg.attachment_url}
+                                  alt="Image attachment"
+                                  className="max-w-full max-h-64 object-contain cursor-pointer hover:opacity-90"
+                                  onError={(e) => {
+                                    // Replace with a styled placeholder on error
+                                    const target = e.target as HTMLImageElement
+                                    target.onerror = null // Prevent infinite loop
+                                    target.style.display = 'none'
+                                    // Show fallback div
+                                    const fallback = target.nextElementSibling as HTMLElement
+                                    if (fallback) fallback.style.display = 'flex'
+                                  }}
+                                />
+                                <div
+                                  className="hidden w-48 h-32 bg-gray-100 rounded items-center justify-center text-gray-400 text-sm"
+                                  style={{ display: 'none' }}
+                                >
+                                  <div className="text-center">
+                                    <div className="text-2xl mb-1">🖼️</div>
+                                    <div>Image expired</div>
+                                  </div>
+                                </div>
+                              </a>
+                            </div>
                           )}
 
                           {/* Video Attachment */}

@@ -2,6 +2,7 @@
 
 import { usePathname, useRouter } from 'next/navigation'
 import { ReactNode, useState, useEffect } from 'react'
+import { useWebSocketContext } from '@/contexts/WebSocketContext'
 
 interface DashboardLayoutProps {
   children: ReactNode
@@ -12,6 +13,7 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   const router = useRouter()
   const [userId, setUserId] = useState<number | null>(null)
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
+  const { disconnect, isConnected, connect } = useWebSocketContext()
 
   useEffect(() => {
     const storedUserId = localStorage.getItem('userId')
@@ -20,7 +22,9 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
       return
     }
     setUserId(parseInt(storedUserId))
-  }, [router])
+    // Ensure WebSocket is connected when dashboard loads
+    connect()
+  }, [router, connect])
 
   const navItems = [
     { name: 'Dashboard', path: '/dashboard', icon: '🏠' },
@@ -30,7 +34,10 @@ export default function DashboardLayout({ children }: DashboardLayoutProps) {
   ]
 
   const handleLogout = () => {
+    // Disconnect WebSocket before logging out
+    disconnect()
     localStorage.removeItem('userId')
+    localStorage.removeItem('workspaceId')
     router.push('/')
   }
 
