@@ -105,6 +105,22 @@ export default function Messages() {
     }
   }, [lastMessage, workspaceId, selectedConversation])
 
+  // Polling fallback - check for new messages every 5 seconds as backup
+  // This catches messages missed during WebSocket reconnection or deploy
+  useEffect(() => {
+    if (!selectedConversation) return
+
+    const pollInterval = setInterval(() => {
+      // Only poll if WebSocket is not connected
+      if (!isConnected) {
+        console.log('📡 Polling for new messages (WebSocket disconnected)')
+        loadMessages(selectedConversation)
+      }
+    }, 5000)
+
+    return () => clearInterval(pollInterval)
+  }, [selectedConversation, isConnected])
+
   const loadConversations = async (wid: number) => {
     try {
       console.log('Loading conversations for workspace:', wid)
