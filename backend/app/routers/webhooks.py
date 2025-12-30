@@ -446,8 +446,10 @@ async def handle_facebook_message(event: Dict[str, Any], db: Session):
                 user_info = await fetch_sender_info(user_psid, account.access_token, "facebook")
 
                 # Update or create conversation participant
+                # IMPORTANT: Filter by workspace_id to allow same conversation in multiple workspaces
                 participant = db.query(ConversationParticipant).filter(
-                    ConversationParticipant.conversation_id == conv_id
+                    ConversationParticipant.conversation_id == conv_id,
+                    ConversationParticipant.workspace_id == account.workspace_id
                 ).first()
 
                 if not participant:
@@ -473,9 +475,6 @@ async def handle_facebook_message(event: Dict[str, Any], db: Session):
                     if user_info.get("profile_pic"):
                         participant.participant_profile_pic = user_info.get("profile_pic")
                     participant.last_message_at = datetime.utcnow()
-                    # Fix missing workspace_id for existing participants
-                    if not participant.workspace_id and account.workspace_id:
-                        participant.workspace_id = account.workspace_id
 
                 # Parse attachments
                 attachment_data = parse_message_attachments(message)
@@ -809,8 +808,10 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                 user_info = await fetch_sender_info(user_ig_id, account.access_token, "instagram")
 
                 # Update or create conversation participant
+                # IMPORTANT: Filter by workspace_id to allow same conversation in multiple workspaces
                 participant = db.query(ConversationParticipant).filter(
-                    ConversationParticipant.conversation_id == conv_id
+                    ConversationParticipant.conversation_id == conv_id,
+                    ConversationParticipant.workspace_id == account.workspace_id
                 ).first()
 
                 if not participant:
@@ -838,9 +839,6 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                     if user_info.get("profile_pic"):
                         participant.participant_profile_pic = user_info.get("profile_pic")
                     participant.last_message_at = datetime.utcnow()
-                    # Fix missing workspace_id for existing participants
-                    if not participant.workspace_id and account.workspace_id:
-                        participant.workspace_id = account.workspace_id
 
                 # Parse attachments
                 attachment_data = parse_message_attachments(message)

@@ -371,10 +371,12 @@ async def sync_account_messages(db: Session, account: ConnectedAccount, max_conv
                         # Create or update conversation participant for incoming messages
                         if direction == MessageDirection.INCOMING:
                             # Try to query participant, handle missing ai_enabled column
+                            # IMPORTANT: Filter by workspace_id to allow same conversation in multiple workspaces
                             participant = None
                             try:
                                 participant = db.query(ConversationParticipant).filter(
-                                    ConversationParticipant.conversation_id == conv_id
+                                    ConversationParticipant.conversation_id == conv_id,
+                                    ConversationParticipant.workspace_id == account.workspace_id
                                 ).first()
                             except Exception as e:
                                 # If ai_enabled column doesn't exist, query will fail
@@ -499,10 +501,12 @@ async def sync_account_messages(db: Session, account: ConnectedAccount, max_conv
                         # Create or update conversation participant for incoming messages
                         if direction == MessageDirection.INCOMING:
                             # Try to query participant, handle missing ai_enabled column
+                            # IMPORTANT: Filter by workspace_id to allow same conversation in multiple workspaces
                             participant = None
                             try:
                                 participant = db.query(ConversationParticipant).filter(
-                                    ConversationParticipant.conversation_id == conv_id
+                                    ConversationParticipant.conversation_id == conv_id,
+                                    ConversationParticipant.workspace_id == account.workspace_id
                                 ).first()
                             except Exception as e:
                                 # If ai_enabled column doesn't exist, query will fail
