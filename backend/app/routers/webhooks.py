@@ -844,20 +844,12 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                 if account:
                     break
 
-            # If still no match but we have exactly one IGAAL account, use it
-            # This is a reasonable assumption since webhook subscriptions are per-account
-            if not account and len(igaal_accounts) == 1:
-                igaal_account = igaal_accounts[0]
-                logger.info(f"📌 Only one IGAAL account found, assuming webhook is for account {igaal_account.id} (@{igaal_account.platform_username})")
-
-                # Update platform_user_id with the webhook's recipient_id (Instagram Account ID)
-                if igaal_account.platform_user_id != ig_account_id:
-                    old_id = igaal_account.platform_user_id
-                    igaal_account.platform_user_id = ig_account_id
-                    db.commit()
-                    logger.info(f"🔧 Auto-fixed platform_user_id: {old_id} → {ig_account_id}")
-
-                account = igaal_account
+            # NOTE: We do NOT blindly assume webhooks are for the only IGAAL account
+            # This would be dangerous as webhooks could be for a completely different
+            # Instagram account. Only match when we can VERIFY via conversations.
+            if not account and len(igaal_accounts) > 0:
+                logger.warning(f"⚠️  Found {len(igaal_accounts)} IGAAL account(s) but none matched the webhook recipient_id: {ig_account_id}")
+                logger.warning(f"⚠️  This webhook may be for a different Instagram account not connected in this system")
 
         # Log detailed info if account not found
         if not account:
