@@ -620,14 +620,20 @@ export default function Messages() {
                   </button>
 
                   {/* Voice Note Button */}
-                  <button
-                    onClick={isRecording ? stopRecording : startRecording}
-                    disabled={uploadingAttachment || !!attachment}
-                    className={`p-2 rounded-lg ${isRecording ? 'text-red-500 bg-red-50' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'} disabled:opacity-50`}
-                    title={isRecording ? "Stop recording" : "Record voice note"}
-                  >
-                    🎤
-                  </button>
+                  {(() => {
+                    const currentConv = conversations.find(c => c.id === selectedConversation)
+                    const isInstagram = currentConv?.platform === 'instagram'
+                    return (
+                      <button
+                        onClick={isRecording ? stopRecording : startRecording}
+                        disabled={uploadingAttachment || !!attachment || isInstagram}
+                        className={`p-2 rounded-lg ${isRecording ? 'text-red-500 bg-red-50' : isInstagram ? 'text-gray-300 cursor-not-allowed' : 'text-gray-500 hover:text-gray-700 hover:bg-gray-100'} disabled:opacity-50`}
+                        title={isInstagram ? "Voice notes not supported on Instagram" : isRecording ? "Stop recording" : "Record voice note"}
+                      >
+                        🎤
+                      </button>
+                    )
+                  })()}
 
                   {/* Text Input */}
                   <input

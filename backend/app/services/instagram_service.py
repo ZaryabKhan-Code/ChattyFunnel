@@ -344,8 +344,10 @@ class InstagramService:
         For Instagram Business Login: Use /{IG_ID}/messages or /me/messages
         For Facebook Page-managed Instagram: Use /{PAGE_ID}/messages
 
-        Supports text messages and attachments (images, videos, audio).
+        Supports text messages and attachments (images, videos).
         Note: Instagram has a 1000 character limit for text messages.
+        Note: Instagram does NOT support audio/webm format for voice notes.
+              Supported formats: image/*, video/mp4
         """
         import logging
         logger = logging.getLogger(__name__)
@@ -355,6 +357,16 @@ class InstagramService:
         if message_text and len(message_text) > MAX_MESSAGE_LENGTH:
             logger.warning(f"⚠️  Message too long ({len(message_text)} chars). Truncating to {MAX_MESSAGE_LENGTH} chars.")
             message_text = message_text[:MAX_MESSAGE_LENGTH - 3] + "..."
+
+        # Check for unsupported audio formats on Instagram
+        if attachment_url and attachment_type:
+            if attachment_type.startswith('audio/'):
+                # Instagram doesn't support audio attachments in the same way as Facebook
+                # WebM, MP3, WAV etc. are not supported
+                raise ValueError(
+                    "Instagram does not support voice notes or audio attachments. "
+                    "Please send a text message, image, or video instead."
+                )
 
         async with httpx.AsyncClient() as client:
             # Build message payload
