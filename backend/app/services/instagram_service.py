@@ -541,7 +541,7 @@ class InstagramService:
 
             # Subscribe to all relevant webhook fields
             payload = {
-                "subscribed_fields": "messages,messaging_postbacks,messaging_optins,messaging_referral,messaging_seen,messaging_reactions"
+                "subscribed_fields": "messages,messaging_postbacks,messaging_optins,messaging_referral,messaging_seen,message_reactions"
             }
 
             logger.info(f"🔔 Subscribing to webhooks: {url}")
