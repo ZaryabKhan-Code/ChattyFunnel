@@ -771,7 +771,10 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                 .first()
             )
 
-        # Final fallback: Check Instagram Business Login accounts by fetching /me ID
+        # Final fallback: Check Instagram Business Login accounts
+        # For Instagram Business Login, /me returns Instagram-scoped User ID (stored in page_id)
+        # But webhooks send Instagram Account ID (IGSID) which is DIFFERENT
+        # We need to identify the account by checking conversations or using heuristics
         if not account:
             logger.info(f"Not found by page_id, checking Instagram Business Login accounts...")
             # Find all Instagram accounts with IGAAL tokens (Instagram Business Login)
@@ -788,35 +791,73 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                 .all()
             )
 
-            # Check each IGAAL account by fetching their Instagram Account ID
+            logger.info(f"Found {len(igaal_accounts)} active IGAAL accounts")
+
+            # For each IGAAL account, try to identify if the webhook is for this account
+            # by checking conversations for a participant matching the sender
             for igaal_account in igaal_accounts:
                 try:
                     async with httpx.AsyncClient() as client:
+                        # Query conversations to find if sender is a participant
+                        # This confirms the webhook is for this account
                         response = await client.get(
-                            "https://graph.instagram.com/me",
+                            f"https://graph.instagram.com/{igaal_account.page_id}/conversations",
                             params={
-                                "fields": "id",
+                                "platform": "instagram",
+                                "fields": "participants",
                                 "access_token": igaal_account.access_token,
                             },
-                            timeout=5.0,
+                            timeout=10.0,
                         )
 
                         if response.status_code == 200:
-                            instagram_account_id = response.json().get("id")
+                            conversations = response.json().get("data", [])
+                            logger.info(f"Checking {len(conversations)} conversations for IGAAL account {igaal_account.id}")
 
-                            if instagram_account_id == ig_account_id:
-                                logger.info(f"✅ Found matching Instagram Business Login account: {igaal_account.id}")
-                                logger.info(f"🔧 Auto-fixing database: setting platform_user_id to {instagram_account_id}")
+                            # Check if any conversation has the sender as a participant
+                            for conv in conversations:
+                                participants = conv.get("participants", {}).get("data", [])
+                                for participant in participants:
+                                    participant_id = participant.get("id")
+                                    # Check if this participant is the sender OR the recipient (our account)
+                                    if participant_id == user_ig_id or participant_id == ig_account_id:
+                                        logger.info(f"✅ Found matching conversation! Participant {participant_id} matches webhook data")
+                                        logger.info(f"✅ This webhook is for IGAAL account {igaal_account.id} (@{igaal_account.platform_username})")
 
-                                # Auto-fix the database
-                                igaal_account.platform_user_id = instagram_account_id
-                                db.commit()
+                                        # Update platform_user_id with the correct Instagram Account ID (IGSID)
+                                        if igaal_account.platform_user_id != ig_account_id:
+                                            old_id = igaal_account.platform_user_id
+                                            igaal_account.platform_user_id = ig_account_id
+                                            db.commit()
+                                            logger.info(f"🔧 Auto-fixed platform_user_id: {old_id} → {ig_account_id}")
 
-                                account = igaal_account
-                                break
+                                        account = igaal_account
+                                        break
+                                if account:
+                                    break
+                        else:
+                            logger.warning(f"Failed to fetch conversations for IGAAL account {igaal_account.id}: {response.status_code}")
                 except Exception as e:
                     logger.warning(f"Failed to check IGAAL account {igaal_account.id}: {e}")
                     continue
+
+                if account:
+                    break
+
+            # If still no match but we have exactly one IGAAL account, use it
+            # This is a reasonable assumption since webhook subscriptions are per-account
+            if not account and len(igaal_accounts) == 1:
+                igaal_account = igaal_accounts[0]
+                logger.info(f"📌 Only one IGAAL account found, assuming webhook is for account {igaal_account.id} (@{igaal_account.platform_username})")
+
+                # Update platform_user_id with the webhook's recipient_id (Instagram Account ID)
+                if igaal_account.platform_user_id != ig_account_id:
+                    old_id = igaal_account.platform_user_id
+                    igaal_account.platform_user_id = ig_account_id
+                    db.commit()
+                    logger.info(f"🔧 Auto-fixed platform_user_id: {old_id} → {ig_account_id}")
+
+                account = igaal_account
 
         # Log detailed info if account not found
         if not account:
