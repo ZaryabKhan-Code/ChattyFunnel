@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import DashboardLayout from '@/components/DashboardLayout'
 import { useWebSocket } from '@/hooks/useWebSocket'
@@ -33,6 +33,16 @@ export default function Messages() {
   const [messageInput, setMessageInput] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
+  const messagesEndRef = useRef<HTMLDivElement>(null)
+
+  // Auto-scroll to bottom when new messages arrive
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }
+
+  useEffect(() => {
+    scrollToBottom()
+  }, [messages])
 
   // WebSocket hook
   const { isConnected, lastMessage, sendMessage: wsSendMessage } = useWebSocket(userId)
@@ -55,12 +65,31 @@ export default function Messages() {
   useEffect(() => {
     if (lastMessage && lastMessage.type === 'new_message') {
       console.log('New message received via WebSocket:', lastMessage.data)
-      // Reload conversations and messages if current conversation
+      const newMsg = lastMessage.data.message
+      const convId = lastMessage.data.conversation_id
+
+      // If we're viewing the conversation that received the message, add it immediately
+      if (selectedConversation === convId && newMsg) {
+        setMessages(prev => {
+          // Check if message already exists to avoid duplicates
+          const exists = prev.some(m => m.id === newMsg.id)
+          if (exists) return prev
+
+          // Add the new message
+          const newMessage: Message = {
+            id: newMsg.id,
+            message_text: newMsg.content || '',
+            direction: newMsg.direction || 'incoming',
+            created_at: newMsg.created_at,
+            sender_id: newMsg.sender_id
+          }
+          return [...prev, newMessage]
+        })
+      }
+
+      // Update conversations list to show new last message
       if (workspaceId) {
         loadConversations(workspaceId)
-      }
-      if (selectedConversation === lastMessage.data.conversation_id) {
-        loadMessages(selectedConversation)
       }
     }
   }, [lastMessage, workspaceId, selectedConversation])
@@ -188,16 +217,19 @@ export default function Messages() {
                 ) : messages.length === 0 ? (
                   <div className="text-center text-gray-500">No messages yet</div>
                 ) : (
-                  messages.map(msg => (
-                    <div key={msg.id} className={`flex ${msg.direction === 'outgoing' ? 'justify-end' : 'justify-start'}`}>
-                      <div className={`max-w-xs px-4 py-2 rounded-lg ${msg.direction === 'outgoing' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-900'}`}>
-                        <div className="text-sm">{msg.message_text}</div>
-                        <div className={`text-xs mt-1 ${msg.direction === 'outgoing' ? 'text-blue-100' : 'text-gray-500'}`}>
-                          {formatTime(msg.created_at)}
+                  <>
+                    {messages.map(msg => (
+                      <div key={msg.id} className={`flex ${msg.direction === 'outgoing' ? 'justify-end' : 'justify-start'}`}>
+                        <div className={`max-w-xs px-4 py-2 rounded-lg ${msg.direction === 'outgoing' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-900'}`}>
+                          <div className="text-sm">{msg.message_text}</div>
+                          <div className={`text-xs mt-1 ${msg.direction === 'outgoing' ? 'text-blue-100' : 'text-gray-500'}`}>
+                            {formatTime(msg.created_at)}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))
+                    ))}
+                    <div ref={messagesEndRef} />
+                  </>
                 )}
               </div>
 
