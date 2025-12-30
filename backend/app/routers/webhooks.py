@@ -444,6 +444,7 @@ async def handle_facebook_message(event: Dict[str, Any], db: Session):
                         participant_username=sender_info.get("username"),
                         participant_profile_pic=sender_info.get("profile_pic"),
                         user_id=account.user_id,
+                        workspace_id=account.workspace_id,
                         last_message_at=datetime.utcnow(),
                     )
                     db.add(participant)
@@ -453,6 +454,9 @@ async def handle_facebook_message(event: Dict[str, Any], db: Session):
                     participant.participant_username = sender_info.get("username")
                     participant.participant_profile_pic = sender_info.get("profile_pic")
                     participant.last_message_at = datetime.utcnow()
+                    # Fix missing workspace_id for existing participants
+                    if not participant.workspace_id and account.workspace_id:
+                        participant.workspace_id = account.workspace_id
 
                 # Parse attachments
                 attachment_data = parse_message_attachments(message)
@@ -792,6 +796,7 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                         participant_username=sender_info.get("username"),
                         participant_profile_pic=sender_info.get("profile_pic"),
                         user_id=account.user_id,
+                        workspace_id=account.workspace_id,
                         last_message_at=datetime.utcnow(),
                     )
                     db.add(participant)
@@ -801,6 +806,9 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                     participant.participant_username = sender_info.get("username")
                     participant.participant_profile_pic = sender_info.get("profile_pic")
                     participant.last_message_at = datetime.utcnow()
+                    # Fix missing workspace_id for existing participants
+                    if not participant.workspace_id and account.workspace_id:
+                        participant.workspace_id = account.workspace_id
 
                 # Parse attachments
                 attachment_data = parse_message_attachments(message)

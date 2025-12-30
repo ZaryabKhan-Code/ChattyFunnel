@@ -848,23 +848,23 @@ async def send_message_endpoint(
                 recipient_id=participant.participant_id,
                 message_text=request.message_text,
                 access_token=account.access_token,
+                page_id=account.page_id or account.platform_user_id,
                 attachment_url=request.attachment_url,
                 attachment_type=request.attachment_type
             )
 
         # Save message to database
         message = Message(
-            platform_message_id=result.get("message_id", f"sent_{datetime.utcnow().timestamp()}"),
+            user_id=account.user_id,
+            platform=participant.platform,
             conversation_id=request.conversation_id,
-            workspace_id=request.workspace_id,
+            message_id=result.get("message_id", f"sent_{datetime.utcnow().timestamp()}"),
             sender_id=account.platform_user_id,
             recipient_id=participant.participant_id,
-            message_text=request.message_text,
+            content=request.message_text,
             message_type=MessageType.TEXT if not request.attachment_url else MessageType.IMAGE,
             direction=MessageDirection.OUTGOING,
             status=MessageStatus.SENT,
-            created_at=datetime.utcnow(),
-            platform=participant.platform,
             attachment_url=request.attachment_url
         )
         db.add(message)
