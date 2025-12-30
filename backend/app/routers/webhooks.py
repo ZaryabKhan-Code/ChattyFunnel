@@ -491,6 +491,7 @@ async def handle_facebook_message(event: Dict[str, Any], db: Session):
                         last_message_at=datetime.utcnow(),
                     )
                     db.add(participant)
+                    db.flush()  # Make visible immediately to prevent duplicates
                 else:
                     # Update participant info and last message time
                     if user_info.get("name"):
@@ -939,6 +940,7 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                         last_message_at=datetime.utcnow(),
                     )
                     db.add(participant)
+                    db.flush()  # Make visible immediately to prevent duplicates
                 else:
                     # Update participant info and last message time (only if we got valid info)
                     if user_info.get("name"):

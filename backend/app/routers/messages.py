@@ -398,6 +398,7 @@ async def sync_account_messages(db: Session, account: ConnectedAccount, max_conv
                                 last_message_at=datetime.utcnow(),
                             )
                             db.add(participant)
+                            db.flush()  # Make visible for subsequent queries to prevent duplicates
                             logger.info(f"📝 Created ConversationParticipant for workspace {account.workspace_id}: {conv_id}")
 
                     # Check if message already exists (messages are shared across workspaces)
@@ -533,6 +534,7 @@ async def sync_account_messages(db: Session, account: ConnectedAccount, max_conv
                                 last_message_at=datetime.utcnow(),
                             )
                             db.add(participant)
+                            db.flush()  # Make visible for subsequent queries to prevent duplicates
                             logger.info(f"📝 Created ConversationParticipant for workspace {account.workspace_id}: {conv_id}")
 
                     # Check if message already exists (messages are shared across workspaces)
