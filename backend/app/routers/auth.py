@@ -177,6 +177,7 @@ async def facebook_callback(
                 # Update existing account
                 existing_account.access_token = page["access_token"]
                 existing_account.platform_username = page["name"]
+                existing_account.connection_type = "facebook_page"
                 existing_account.token_expires_at = datetime.utcnow() + timedelta(
                     seconds=expires_in
                 )
@@ -189,6 +190,7 @@ async def facebook_callback(
                     user_id=user.id,
                     workspace_id=workspace_id,
                     platform="facebook",
+                    connection_type="facebook_page",
                     platform_user_id=user_info["id"],
                     platform_username=page["name"],
                     access_token=page["access_token"],
@@ -255,7 +257,7 @@ async def facebook_callback(
                         existing_ig_account.access_token = page["access_token"]
                         existing_ig_account.platform_username = ig_username
                         existing_ig_account.page_id = page["id"]
-                        existing_ig_account.connection_type = "instagram_business_login"
+                        existing_ig_account.connection_type = "facebook_page"
                         existing_ig_account.token_expires_at = datetime.utcnow() + timedelta(
                             seconds=expires_in
                         )
@@ -267,7 +269,7 @@ async def facebook_callback(
                             user_id=user.id,
                             workspace_id=workspace_id,
                             platform="instagram",
-                            connection_type="instagram_business_login",
+                            connection_type="facebook_page",
                             platform_user_id=ig_account_id,
                             platform_username=ig_username,
                             access_token=page["access_token"],
