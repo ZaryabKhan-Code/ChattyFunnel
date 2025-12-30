@@ -15,6 +15,8 @@ class InstagramService:
         Uses the new Instagram Business Login flow with updated scopes.
         Note: Old scopes deprecated on January 27, 2025.
         """
+        from urllib.parse import quote
+
         # New Instagram Business Login scopes (replacing old scopes)
         scopes = [
             "instagram_business_basic",              # Replaces instagram_basic
@@ -23,13 +25,17 @@ class InstagramService:
             "instagram_business_content_publish",
         ]
         scope_string = ",".join(scopes)
+
+        # URL-encode the state parameter (it's a JSON string with special characters)
+        encoded_state = quote(state, safe='')
+
         # Instagram Business Login uses instagram.com, not facebook.com
         return (
             f"https://www.instagram.com/oauth/authorize?"
             f"client_id={self.app_id}&"
             f"redirect_uri={settings.INSTAGRAM_REDIRECT_URI}&"
             f"response_type=code&"
-            f"state={state}&"
+            f"state={encoded_state}&"
             f"scope={scope_string}"
         )
 

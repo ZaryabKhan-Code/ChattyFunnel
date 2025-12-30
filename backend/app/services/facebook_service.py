@@ -11,6 +11,8 @@ class FacebookService:
 
     def get_oauth_url(self, state: str = "") -> str:
         """Generate Facebook OAuth URL (includes Instagram and Business Manager permissions)"""
+        from urllib.parse import quote
+
         scopes = [
             # Facebook Pages permissions
             "pages_messaging",
@@ -25,11 +27,14 @@ class FacebookService:
         ]
         scope_string = ",".join(scopes)
 
+        # URL-encode the state parameter (it's a JSON string with special characters)
+        encoded_state = quote(state, safe='')
+
         return (
             f"https://www.facebook.com/{settings.FACEBOOK_GRAPH_VERSION}/dialog/oauth?"
             f"client_id={self.app_id}&"
             f"redirect_uri={settings.FACEBOOK_REDIRECT_URI}&"
-            f"state={state}&"
+            f"state={encoded_state}&"
             f"scope={scope_string}"
         )
 
