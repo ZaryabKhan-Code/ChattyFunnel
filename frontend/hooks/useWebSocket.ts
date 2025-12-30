@@ -94,7 +94,7 @@ export function useWebSocket(userId: number | null) {
           // Flush any queued messages
           flushMessageQueue()
 
-          // Send ping every 25 seconds to keep connection alive (less than typical 30s timeout)
+          // Send ping every 15 seconds to keep connection alive
           pingInterval.current = setInterval(() => {
             if (ws.current?.readyState === WebSocket.OPEN) {
               console.log('🏓 Sending ping...')
@@ -110,9 +110,9 @@ export function useWebSocket(userId: number | null) {
                   ws.current.close()
                 }
                 // Reconnect will happen in onclose
-              }, 10000) // Wait 10 seconds for pong (generous timeout)
+              }, 5000) // Wait 5 seconds for pong
             }
-          }, 25000) // Ping every 25 seconds
+          }, 15000) // Ping every 15 seconds
         }
       } catch (error) {
         console.error('❌ Failed to create WebSocket:', error)
@@ -189,8 +189,8 @@ export function useWebSocket(userId: number | null) {
           }
 
           // Attempt to reconnect with exponential backoff
-          // Max delay: 30 seconds, starting from 1 second
-          const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000)
+          // Start immediately, then 1s, 2s, 4s, max 10 seconds
+          const delay = reconnectAttempts.current === 0 ? 100 : Math.min(1000 * Math.pow(2, reconnectAttempts.current - 1), 10000)
           reconnectAttempts.current++
 
           console.log(`🔄 Reconnecting in ${delay}ms (attempt ${reconnectAttempts.current})...`)
@@ -223,8 +223,32 @@ export function useWebSocket(userId: number | null) {
       setLastError('Network offline')
     }
 
+    // Reconnect when tab becomes visible
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log('👁️ Tab became visible - checking WebSocket connection')
+        if (ws.current?.readyState !== WebSocket.OPEN && connect.current && !isManualClose.current) {
+          console.log('🔄 WebSocket not open, reconnecting...')
+          reconnectAttempts.current = 0
+          connect.current()
+        }
+      }
+    }
+
+    // Focus handler for immediate reconnection
+    const handleFocus = () => {
+      console.log('🎯 Window focused - checking WebSocket connection')
+      if (ws.current?.readyState !== WebSocket.OPEN && connect.current && !isManualClose.current) {
+        console.log('🔄 WebSocket not open, reconnecting...')
+        reconnectAttempts.current = 0
+        connect.current()
+      }
+    }
+
     window.addEventListener('online', handleOnline)
     window.addEventListener('offline', handleOffline)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', handleFocus)
 
     // Cleanup
     return () => {
@@ -245,6 +269,8 @@ export function useWebSocket(userId: number | null) {
 
       window.removeEventListener('online', handleOnline)
       window.removeEventListener('offline', handleOffline)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', handleFocus)
     }
   }, [userId, getWebSocketUrl, flushMessageQueue])
 

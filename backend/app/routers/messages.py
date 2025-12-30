@@ -676,6 +676,8 @@ async def get_conversations(
                 "id": participant.conversation_id,
                 "participant_name": participant.participant_name,
                 "participant_username": participant.participant_username,
+                "participant_profile_pic": participant.participant_profile_pic,
+                "platform": participant.platform,
                 "last_message": last_message.content if last_message else None,
                 "updated_at": last_message.created_at.isoformat() if last_message else participant.updated_at.isoformat(),
                 "current_funnel": funnel_name
@@ -706,10 +708,14 @@ async def get_conversation_messages(
             {
                 "id": msg.id,
                 "message_text": msg.content or "",
+                "content": msg.content or "",
                 "direction": msg.direction.value,
                 "created_at": msg.created_at.isoformat(),
                 "sender_id": msg.sender_id,
-                "attachments": [{"type": msg.message_type.value, "url": msg.attachment_url}] if msg.attachment_url else []
+                "message_type": msg.message_type.value if msg.message_type else "text",
+                "attachment_url": msg.attachment_url,
+                "attachment_type": msg.attachment_type,
+                "attachment_filename": msg.attachment_filename,
             }
             for msg in messages
         ]
