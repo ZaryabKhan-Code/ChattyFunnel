@@ -45,16 +45,21 @@ async def fetch_sender_info(sender_id: str, access_token: str, platform: str) ->
             # Instagram Business Login token - use graph.instagram.com
             url = f"https://graph.instagram.com/{sender_id}"
             logger.info("🔑 Using Instagram Business Login endpoint for sender info")
+            # Note: profile_picture_url is NOT available for other users (IGBusinessScopedID)
+            # Only the account owner's profile has this field
+            params = {
+                "fields": "id,name,username",
+                "access_token": access_token
+            }
         else:
             # Facebook token - use graph.facebook.com
             url = f"https://graph.facebook.com/v18.0/{sender_id}"
             logger.info("🔑 Using Facebook Graph API endpoint for sender info")
-
-        # Instagram uses profile_picture_url, not profile_pic
-        params = {
-            "fields": "id,name,username,profile_picture_url",
-            "access_token": access_token
-        }
+            # Facebook Page-linked Instagram can access profile_picture_url
+            params = {
+                "fields": "id,name,username,profile_picture_url",
+                "access_token": access_token
+            }
 
     try:
         async with httpx.AsyncClient() as client:
