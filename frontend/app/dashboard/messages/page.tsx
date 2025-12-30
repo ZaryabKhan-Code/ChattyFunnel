@@ -8,6 +8,16 @@ import axios from 'axios'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'https://roamifly-admin-b97e90c67026.herokuapp.com/api'
 
+// Proxy profile pictures through backend to avoid CDN expiration issues
+const getProxiedProfilePic = (url: string | undefined): string | undefined => {
+  if (!url) return undefined
+  // Only proxy Instagram/Facebook CDN URLs that tend to expire
+  if (url.includes('cdninstagram.com') || url.includes('fbcdn.net') || url.includes('xx.fbcdn.net')) {
+    return `${API_URL}/media/profile-pic?url=${encodeURIComponent(url)}`
+  }
+  return url
+}
+
 interface Conversation {
   id: string
   participant_name: string
@@ -220,7 +230,7 @@ export default function Messages() {
                       </div>
                       {conv.participant_profile_pic && (
                         <img
-                          src={conv.participant_profile_pic}
+                          src={getProxiedProfilePic(conv.participant_profile_pic)}
                           alt={conv.participant_name || 'Profile'}
                           className="w-10 h-10 rounded-full object-cover absolute inset-0"
                           onError={(e) => {
@@ -267,7 +277,7 @@ export default function Messages() {
                         </div>
                         {conv.participant_profile_pic && (
                           <img
-                            src={conv.participant_profile_pic}
+                            src={getProxiedProfilePic(conv.participant_profile_pic)}
                             alt={conv.participant_name || 'Profile'}
                             className="w-10 h-10 rounded-full object-cover absolute inset-0"
                             onError={(e) => {
