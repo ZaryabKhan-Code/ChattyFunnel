@@ -344,7 +344,63 @@ async def sync_account_messages(db: Session, account: ConnectedAccount, max_conv
                 messages = messages[:max_messages_per_conv]
 
                 for msg in messages:
-                    # Check if message already exists
+                    # Determine direction
+                    direction = (
+                        MessageDirection.OUTGOING
+                        if msg["from"]["id"] == account.page_id
+                        else MessageDirection.INCOMING
+                    )
+
+                    # Determine sender_id for stable conversation ID
+                    sender_id = msg["from"]["id"]
+                    other_participant = sender_id if direction == MessageDirection.INCOMING else (
+                        msg["to"]["data"][0]["id"] if msg.get("to") else account.page_id
+                    )
+
+                    # Create stable conversation ID
+                    conv_id = create_stable_conversation_id("facebook", user_id, other_participant)
+
+                    # IMPORTANT: Create or update conversation participant REGARDLESS of message existence
+                    # This ensures new workspaces get their own ConversationParticipant records
+                    if direction == MessageDirection.INCOMING:
+                        # Try to query participant, handle missing ai_enabled column
+                        # IMPORTANT: Filter by workspace_id to allow same conversation in multiple workspaces
+                        participant = None
+                        try:
+                            participant = db.query(ConversationParticipant).filter(
+                                ConversationParticipant.conversation_id == conv_id,
+                                ConversationParticipant.workspace_id == account.workspace_id
+                            ).first()
+                        except Exception as e:
+                            # If ai_enabled column doesn't exist, query will fail
+                            # Migration is required
+                            if "ai_enabled" in str(e):
+                                raise HTTPException(
+                                    status_code=500,
+                                    detail="Database migration required. Run: heroku run python backend/migrate_add_message_fields.py"
+                                )
+                            raise
+
+                        if not participant:
+                            # Fetch sender info only when creating new participant
+                            sender_info = await fetch_sender_info(sender_id, account.access_token, "facebook")
+
+                            participant = ConversationParticipant(
+                                conversation_id=conv_id,
+                                platform="facebook",
+                                platform_conversation_id=sender_id,
+                                participant_id=sender_id,
+                                participant_name=sender_info.get("name"),
+                                participant_username=sender_info.get("username"),
+                                participant_profile_pic=sender_info.get("profile_pic"),
+                                user_id=user_id,
+                                workspace_id=account.workspace_id,
+                                last_message_at=datetime.utcnow(),
+                            )
+                            db.add(participant)
+                            logger.info(f"📝 Created ConversationParticipant for workspace {account.workspace_id}: {conv_id}")
+
+                    # Check if message already exists (messages are shared across workspaces)
                     existing = (
                         db.query(Message)
                         .filter(Message.message_id == msg["id"])
@@ -352,66 +408,6 @@ async def sync_account_messages(db: Session, account: ConnectedAccount, max_conv
                     )
 
                     if not existing:
-                        # Determine direction
-                        direction = (
-                            MessageDirection.OUTGOING
-                            if msg["from"]["id"] == account.page_id
-                            else MessageDirection.INCOMING
-                        )
-
-                        # Determine sender_id for stable conversation ID
-                        sender_id = msg["from"]["id"]
-                        other_participant = sender_id if direction == MessageDirection.INCOMING else (
-                            msg["to"]["data"][0]["id"] if msg.get("to") else account.page_id
-                        )
-
-                        # Create stable conversation ID
-                        conv_id = create_stable_conversation_id("facebook", user_id, other_participant)
-
-                        # Create or update conversation participant for incoming messages
-                        if direction == MessageDirection.INCOMING:
-                            # Try to query participant, handle missing ai_enabled column
-                            # IMPORTANT: Filter by workspace_id to allow same conversation in multiple workspaces
-                            participant = None
-                            try:
-                                participant = db.query(ConversationParticipant).filter(
-                                    ConversationParticipant.conversation_id == conv_id,
-                                    ConversationParticipant.workspace_id == account.workspace_id
-                                ).first()
-                            except Exception as e:
-                                # If ai_enabled column doesn't exist, query will fail
-                                # Migration is required
-                                if "ai_enabled" in str(e):
-                                    raise HTTPException(
-                                        status_code=500,
-                                        detail="Database migration required. Run: heroku run python backend/migrate_add_message_fields.py"
-                                    )
-                                raise
-
-                            # Fetch sender info
-                            sender_info = await fetch_sender_info(sender_id, account.access_token, "facebook")
-
-                            if not participant:
-                                participant = ConversationParticipant(
-                                    conversation_id=conv_id,
-                                    platform="facebook",
-                                    platform_conversation_id=sender_id,
-                                    participant_id=sender_id,
-                                    participant_name=sender_info.get("name"),
-                                    participant_username=sender_info.get("username"),
-                                    participant_profile_pic=sender_info.get("profile_pic"),
-                                    user_id=user_id,
-                                    workspace_id=account.workspace_id,
-                                    last_message_at=datetime.utcnow(),
-                                )
-                                db.add(participant)
-                            else:
-                                # Update participant info
-                                participant.participant_name = sender_info.get("name")
-                                participant.participant_username = sender_info.get("username")
-                                participant.participant_profile_pic = sender_info.get("profile_pic")
-                                participant.last_message_at = datetime.utcnow()
-
                         # Parse attachments
                         attachment_data = parse_message_attachments(msg)
                         message_type = MessageType.TEXT
@@ -474,51 +470,45 @@ async def sync_account_messages(db: Session, account: ConnectedAccount, max_conv
                 messages = messages[:max_messages_per_conv]
 
                 for msg in messages:
-                    # Check if message already exists
-                    existing = (
-                        db.query(Message)
-                        .filter(Message.message_id == msg["id"])
-                        .first()
+                    # Determine direction
+                    direction = (
+                        MessageDirection.OUTGOING
+                        if msg["from"]["id"] == account.platform_user_id
+                        else MessageDirection.INCOMING
                     )
 
-                    if not existing:
-                        # Determine direction
-                        direction = (
-                            MessageDirection.OUTGOING
-                            if msg["from"]["id"] == account.platform_user_id
-                            else MessageDirection.INCOMING
-                        )
+                    # Determine sender_id for stable conversation ID
+                    sender_id = msg["from"]["id"]
+                    other_participant = sender_id if direction == MessageDirection.INCOMING else (
+                        msg["to"]["data"][0]["id"] if msg.get("to") else account.platform_user_id
+                    )
 
-                        # Determine sender_id for stable conversation ID
-                        sender_id = msg["from"]["id"]
-                        other_participant = sender_id if direction == MessageDirection.INCOMING else (
-                            msg["to"]["data"][0]["id"] if msg.get("to") else account.platform_user_id
-                        )
+                    # Create stable conversation ID
+                    conv_id = create_stable_conversation_id("instagram", user_id, other_participant)
 
-                        # Create stable conversation ID
-                        conv_id = create_stable_conversation_id("instagram", user_id, other_participant)
+                    # IMPORTANT: Create or update conversation participant REGARDLESS of message existence
+                    # This ensures new workspaces get their own ConversationParticipant records
+                    if direction == MessageDirection.INCOMING:
+                        # Try to query participant, handle missing ai_enabled column
+                        # IMPORTANT: Filter by workspace_id to allow same conversation in multiple workspaces
+                        participant = None
+                        try:
+                            participant = db.query(ConversationParticipant).filter(
+                                ConversationParticipant.conversation_id == conv_id,
+                                ConversationParticipant.workspace_id == account.workspace_id
+                            ).first()
+                        except Exception as e:
+                            # If ai_enabled column doesn't exist, query will fail
+                            # Migration is required
+                            if "ai_enabled" in str(e):
+                                raise HTTPException(
+                                    status_code=500,
+                                    detail="Database migration required. Run: heroku run python backend/migrate_add_message_fields.py"
+                                )
+                            raise
 
-                        # Create or update conversation participant for incoming messages
-                        if direction == MessageDirection.INCOMING:
-                            # Try to query participant, handle missing ai_enabled column
-                            # IMPORTANT: Filter by workspace_id to allow same conversation in multiple workspaces
-                            participant = None
-                            try:
-                                participant = db.query(ConversationParticipant).filter(
-                                    ConversationParticipant.conversation_id == conv_id,
-                                    ConversationParticipant.workspace_id == account.workspace_id
-                                ).first()
-                            except Exception as e:
-                                # If ai_enabled column doesn't exist, query will fail
-                                # Migration is required
-                                if "ai_enabled" in str(e):
-                                    raise HTTPException(
-                                        status_code=500,
-                                        detail="Database migration required. Run: heroku run python backend/migrate_add_message_fields.py"
-                                    )
-                                raise
-
-                            # Fetch sender info
+                        if not participant:
+                            # Fetch sender info only when creating new participant
                             sender_info = await fetch_sender_info(sender_id, account.access_token, "instagram")
 
                             # Use conversation participant username as fallback if fetch_sender_info failed
@@ -530,29 +520,29 @@ async def sync_account_messages(db: Session, account: ConnectedAccount, max_conv
                                     sender_info["name"] = fallback_username  # Use username as name too
                                     logger.info(f"👤 Using conversation participant username: @{fallback_username}")
 
-                            if not participant:
-                                participant = ConversationParticipant(
-                                    conversation_id=conv_id,
-                                    platform="instagram",
-                                    platform_conversation_id=sender_id,
-                                    participant_id=sender_id,
-                                    participant_name=sender_info.get("name") or sender_info.get("username") or "Instagram User",
-                                    participant_username=sender_info.get("username"),
-                                    participant_profile_pic=sender_info.get("profile_pic"),
-                                    user_id=user_id,
-                                    workspace_id=account.workspace_id,
-                                    last_message_at=datetime.utcnow(),
-                                )
-                                db.add(participant)
-                            else:
-                                # Update participant info (only if we got valid info)
-                                if sender_info.get("name"):
-                                    participant.participant_name = sender_info.get("name")
-                                if sender_info.get("username"):
-                                    participant.participant_username = sender_info.get("username")
-                                if sender_info.get("profile_pic"):
-                                    participant.participant_profile_pic = sender_info.get("profile_pic")
-                                participant.last_message_at = datetime.utcnow()
+                            participant = ConversationParticipant(
+                                conversation_id=conv_id,
+                                platform="instagram",
+                                platform_conversation_id=sender_id,
+                                participant_id=sender_id,
+                                participant_name=sender_info.get("name") or sender_info.get("username") or "Instagram User",
+                                participant_username=sender_info.get("username"),
+                                participant_profile_pic=sender_info.get("profile_pic"),
+                                user_id=user_id,
+                                workspace_id=account.workspace_id,
+                                last_message_at=datetime.utcnow(),
+                            )
+                            db.add(participant)
+                            logger.info(f"📝 Created ConversationParticipant for workspace {account.workspace_id}: {conv_id}")
+
+                    # Check if message already exists (messages are shared across workspaces)
+                    existing = (
+                        db.query(Message)
+                        .filter(Message.message_id == msg["id"])
+                        .first()
+                    )
+
+                    if not existing:
 
                         # Parse attachments
                         attachment_data = parse_message_attachments(msg)
