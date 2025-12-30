@@ -56,10 +56,13 @@ def get_or_create_default_workspace(user: User, db: Session) -> int:
 
 
 @router.get("/facebook/login")
-async def facebook_login(user_id: int = Query(...)):
+async def facebook_login(user_id: int = Query(...), workspace_id: Optional[int] = Query(None)):
     """Initiate Facebook OAuth flow"""
     fb_service = FacebookService()
-    auth_url = fb_service.get_oauth_url(state=str(user_id))
+    # Encode both user_id and workspace_id in state
+    import json
+    state_data = {"user_id": user_id, "workspace_id": workspace_id}
+    auth_url = fb_service.get_oauth_url(state=json.dumps(state_data))
     return {"auth_url": auth_url}
 
 
@@ -112,8 +115,23 @@ async def facebook_callback(
         if len(pages) == 0:
             logger.warning("⚠️  No pages found! User may not have access to any pages")
 
-        # Get or create user
-        user_id = int(state) if state else None
+        # Parse state to get user_id and workspace_id
+        import json
+        user_id = None
+        requested_workspace_id = None
+
+        if state:
+            try:
+                # Try to parse as JSON (new format)
+                state_data = json.loads(state)
+                user_id = state_data.get("user_id")
+                requested_workspace_id = state_data.get("workspace_id")
+                logger.info(f"Parsed state: user_id={user_id}, workspace_id={requested_workspace_id}")
+            except json.JSONDecodeError:
+                # Fallback to old format (just user_id as string)
+                user_id = int(state)
+                logger.info(f"Legacy state format, user_id={user_id}")
+
         logger.info(f"Looking for user with ID: {user_id}")
 
         if user_id:
@@ -136,8 +154,18 @@ async def facebook_callback(
             db.refresh(user)
             logger.info(f"Created user with ID: {user.id}")
 
-        # Get or create default workspace for user
-        workspace_id = get_or_create_default_workspace(user, db)
+        # Use requested workspace_id if provided, otherwise get/create default
+        if requested_workspace_id:
+            # Verify the user has access to this workspace
+            workspace = db.query(Workspace).filter(Workspace.id == requested_workspace_id).first()
+            if workspace:
+                workspace_id = requested_workspace_id
+                logger.info(f"Using requested workspace {workspace_id}")
+            else:
+                workspace_id = get_or_create_default_workspace(user, db)
+                logger.warning(f"Requested workspace {requested_workspace_id} not found, using default {workspace_id}")
+        else:
+            workspace_id = get_or_create_default_workspace(user, db)
 
         # Save connected accounts for each page
         logger.info(f"Processing {len(pages)} pages...")
@@ -426,10 +454,13 @@ async def facebook_callback(
 
 
 @router.get("/instagram/login")
-async def instagram_login(user_id: int = Query(...)):
+async def instagram_login(user_id: int = Query(...), workspace_id: Optional[int] = Query(None)):
     """Initiate Instagram OAuth flow"""
     ig_service = InstagramService()
-    auth_url = ig_service.get_oauth_url(state=str(user_id))
+    # Encode both user_id and workspace_id in state
+    import json
+    state_data = {"user_id": user_id, "workspace_id": workspace_id}
+    auth_url = ig_service.get_oauth_url(state=json.dumps(state_data))
     return {"auth_url": auth_url}
 
 
@@ -471,8 +502,23 @@ async def instagram_callback(
 
         logger.info(f"Found {len(ig_accounts)} Instagram accounts")
 
-        # Get or create user
-        user_id = int(state) if state else None
+        # Parse state to get user_id and workspace_id
+        import json
+        user_id = None
+        requested_workspace_id = None
+
+        if state:
+            try:
+                # Try to parse as JSON (new format)
+                state_data = json.loads(state)
+                user_id = state_data.get("user_id")
+                requested_workspace_id = state_data.get("workspace_id")
+                logger.info(f"Parsed state: user_id={user_id}, workspace_id={requested_workspace_id}")
+            except json.JSONDecodeError:
+                # Fallback to old format (just user_id as string)
+                user_id = int(state)
+                logger.info(f"Legacy state format, user_id={user_id}")
+
         logger.info(f"Looking for user with ID: {user_id}")
 
         if not user_id:
@@ -485,8 +531,18 @@ async def instagram_callback(
 
         logger.info(f"User found: {user.username}")
 
-        # Get or create default workspace for user
-        workspace_id = get_or_create_default_workspace(user, db)
+        # Use requested workspace_id if provided, otherwise get/create default
+        if requested_workspace_id:
+            # Verify the workspace exists
+            workspace = db.query(Workspace).filter(Workspace.id == requested_workspace_id).first()
+            if workspace:
+                workspace_id = requested_workspace_id
+                logger.info(f"Using requested workspace {workspace_id}")
+            else:
+                workspace_id = get_or_create_default_workspace(user, db)
+                logger.warning(f"Requested workspace {requested_workspace_id} not found, using default {workspace_id}")
+        else:
+            workspace_id = get_or_create_default_workspace(user, db)
 
         # Save connected Instagram accounts
         logger.info(f"Processing {len(ig_accounts)} Instagram accounts...")

@@ -99,10 +99,10 @@ export default function Dashboard() {
   }
 
   const connectFacebook = async () => {
-    if (!userId) return
+    if (!userId || !workspaceId) return
 
     try {
-      const response = await fetch(`${API_URL}/auth/facebook/login?user_id=${userId}`)
+      const response = await fetch(`${API_URL}/auth/facebook/login?user_id=${userId}&workspace_id=${workspaceId}`)
       const data = await response.json()
       window.location.href = data.auth_url
     } catch (error) {
@@ -111,10 +111,10 @@ export default function Dashboard() {
   }
 
   const connectInstagram = async () => {
-    if (!userId) return
+    if (!userId || !workspaceId) return
 
     try {
-      const response = await fetch(`${API_URL}/auth/instagram/login?user_id=${userId}`)
+      const response = await fetch(`${API_URL}/auth/instagram/login?user_id=${userId}&workspace_id=${workspaceId}`)
       const data = await response.json()
       window.location.href = data.auth_url
     } catch (error) {
