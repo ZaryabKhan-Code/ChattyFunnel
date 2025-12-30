@@ -15,22 +15,26 @@ interface ConnectedAccount {
 
 export default function Dashboard() {
   const [userId, setUserId] = useState<number | null>(null)
+  const [workspaceId, setWorkspaceId] = useState<number | null>(null)
   const [connectedAccounts, setConnectedAccounts] = useState<ConnectedAccount[]>([])
   const [loading, setLoading] = useState(true)
+  const [disconnecting, setDisconnecting] = useState<number | null>(null)
   const router = useRouter()
 
   useEffect(() => {
     const storedUserId = localStorage.getItem('userId')
-    const workspaceId = localStorage.getItem('workspaceId')
+    const storedWorkspaceId = localStorage.getItem('workspaceId')
 
-    if (!storedUserId || !workspaceId) {
+    if (!storedUserId || !storedWorkspaceId) {
       router.push('/')
       return
     }
 
     const uid = parseInt(storedUserId)
+    const wid = parseInt(storedWorkspaceId)
     setUserId(uid)
-    loadConnectedAccounts(uid)
+    setWorkspaceId(wid)
+    loadConnectedAccounts(uid, wid)
 
     // Check for OAuth success
     const params = new URLSearchParams(window.location.search)
@@ -38,17 +42,17 @@ export default function Dashboard() {
     if (success === 'facebook') {
       alert('✅ Facebook connected successfully!')
       window.history.replaceState({}, '', '/dashboard')
-      loadConnectedAccounts(uid)
+      loadConnectedAccounts(uid, wid)
     } else if (success === 'instagram') {
       alert('✅ Instagram connected successfully!')
       window.history.replaceState({}, '', '/dashboard')
-      loadConnectedAccounts(uid)
+      loadConnectedAccounts(uid, wid)
     }
   }, [router])
 
-  const loadConnectedAccounts = async (uid: number) => {
+  const loadConnectedAccounts = async (uid: number, wid: number) => {
     try {
-      const response = await fetch(`${API_URL}/accounts/${uid}`)
+      const response = await fetch(`${API_URL}/accounts/${uid}?workspace_id=${wid}`)
       if (response.ok) {
         const accounts = await response.json()
         setConnectedAccounts(accounts.filter((acc: ConnectedAccount) => acc.is_active))
@@ -57,6 +61,32 @@ export default function Dashboard() {
       console.error('Failed to load connected accounts:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const disconnectAccount = async (accountId: number, platform: string) => {
+    if (!confirm(`Are you sure you want to disconnect this ${platform} account?`)) {
+      return
+    }
+
+    setDisconnecting(accountId)
+    try {
+      const response = await fetch(`${API_URL}/accounts/${accountId}`, {
+        method: 'DELETE'
+      })
+      if (response.ok) {
+        alert(`${platform} disconnected successfully!`)
+        if (userId && workspaceId) {
+          loadConnectedAccounts(userId, workspaceId)
+        }
+      } else {
+        alert('Failed to disconnect account. Please try again.')
+      }
+    } catch (error) {
+      console.error('Failed to disconnect account:', error)
+      alert('Failed to disconnect account. Please try again.')
+    } finally {
+      setDisconnecting(null)
     }
   }
 
@@ -120,7 +150,16 @@ export default function Dashboard() {
                             <span className="text-green-600 font-medium">✓ Connected</span>
                             <div className="text-xs mt-1">
                               {connectedAccounts.filter(acc => acc.platform === 'facebook').map(acc => (
-                                <div key={acc.id}>{acc.platform_username}</div>
+                                <div key={acc.id} className="flex items-center gap-2">
+                                  <span>{acc.platform_username}</span>
+                                  <button
+                                    onClick={() => disconnectAccount(acc.id, 'Facebook')}
+                                    disabled={disconnecting === acc.id}
+                                    className="text-red-500 hover:text-red-700 text-xs underline disabled:opacity-50"
+                                  >
+                                    {disconnecting === acc.id ? 'Disconnecting...' : 'Disconnect'}
+                                  </button>
+                                </div>
                               ))}
                             </div>
                           </>
@@ -154,7 +193,16 @@ export default function Dashboard() {
                             <span className="text-green-600 font-medium">✓ Connected</span>
                             <div className="text-xs mt-1">
                               {connectedAccounts.filter(acc => acc.platform === 'instagram').map(acc => (
-                                <div key={acc.id}>@{acc.platform_username}</div>
+                                <div key={acc.id} className="flex items-center gap-2">
+                                  <span>@{acc.platform_username}</span>
+                                  <button
+                                    onClick={() => disconnectAccount(acc.id, 'Instagram')}
+                                    disabled={disconnecting === acc.id}
+                                    className="text-red-500 hover:text-red-700 text-xs underline disabled:opacity-50"
+                                  >
+                                    {disconnecting === acc.id ? 'Disconnecting...' : 'Disconnect'}
+                                  </button>
+                                </div>
                               ))}
                             </div>
                           </>

@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 
 from app.database import get_db
 from app.models import ConnectedAccount, User
@@ -10,17 +10,26 @@ router = APIRouter(prefix="/accounts", tags=["Accounts"])
 
 
 @router.get("/{user_id}", response_model=List[ConnectedAccountResponse])
-async def get_connected_accounts(user_id: int, db: Session = Depends(get_db)):
-    """Get all connected accounts for a user"""
+async def get_connected_accounts(
+    user_id: int,
+    workspace_id: Optional[int] = Query(None, description="Filter by workspace ID"),
+    db: Session = Depends(get_db)
+):
+    """Get all connected accounts for a user, optionally filtered by workspace"""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    accounts = (
-        db.query(ConnectedAccount)
-        .filter(ConnectedAccount.user_id == user_id, ConnectedAccount.is_active == True)
-        .all()
+    query = db.query(ConnectedAccount).filter(
+        ConnectedAccount.user_id == user_id,
+        ConnectedAccount.is_active == True
     )
+
+    # Filter by workspace if provided
+    if workspace_id is not None:
+        query = query.filter(ConnectedAccount.workspace_id == workspace_id)
+
+    accounts = query.all()
 
     return accounts
 
