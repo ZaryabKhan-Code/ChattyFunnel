@@ -6,6 +6,7 @@ import uuid
 import logging
 import mimetypes
 import os
+import subprocess
 from typing import Optional
 
 from app.database import get_db
@@ -13,6 +14,48 @@ from app.schemas.attachment import AttachmentUploadResponse
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/attachments", tags=["Attachments"])
+
+
+def convert_audio_to_mp4(input_path: Path, output_path: Path) -> bool:
+    """
+    Convert audio file to MP4/M4A format using ffmpeg.
+    This is needed because Facebook doesn't support WebM audio playback.
+
+    Returns True if conversion was successful, False otherwise.
+    """
+    try:
+        # Use ffmpeg to convert to m4a (AAC audio in MP4 container)
+        # -y: overwrite output
+        # -i: input file
+        # -c:a aac: use AAC codec
+        # -b:a 128k: 128kbps bitrate
+        result = subprocess.run(
+            [
+                'ffmpeg', '-y', '-i', str(input_path),
+                '-c:a', 'aac', '-b:a', '128k',
+                str(output_path)
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30  # 30 second timeout
+        )
+
+        if result.returncode == 0:
+            logger.info(f"✅ Successfully converted audio to MP4: {output_path}")
+            return True
+        else:
+            logger.error(f"❌ ffmpeg conversion failed: {result.stderr}")
+            return False
+
+    except FileNotFoundError:
+        logger.warning("⚠️  ffmpeg not found, skipping audio conversion")
+        return False
+    except subprocess.TimeoutExpired:
+        logger.error("❌ ffmpeg conversion timed out")
+        return False
+    except Exception as e:
+        logger.error(f"❌ Audio conversion error: {e}")
+        return False
 
 # Configure upload directory
 # Use environment variable if set, otherwise use /tmp/uploads on Heroku, or ./uploads locally
@@ -92,8 +135,9 @@ async def upload_attachment(
             )
 
         # Generate unique filename
-        file_extension = Path(file.filename).suffix
-        unique_filename = f"{uuid.uuid4()}{file_extension}"
+        file_extension = Path(file.filename).suffix.lower()
+        unique_id = str(uuid.uuid4())
+        unique_filename = f"{unique_id}{file_extension}"
 
         # Create type-specific subdirectory
         type_dir = UPLOAD_DIR / attachment_type
@@ -104,9 +148,31 @@ async def upload_attachment(
         with open(file_path, "wb") as f:
             f.write(file_content)
 
+        final_file_path = file_path
+        final_filename = unique_filename
+        final_mime_type = mime_type
+
+        # Convert WebM/OGG audio to MP4/M4A for Facebook compatibility
+        if attachment_type in ["audio", "voice_note"] and file_extension in [".webm", ".ogg"]:
+            logger.info(f"🔄 Converting {file_extension} audio to M4A for Facebook compatibility...")
+            mp4_filename = f"{unique_id}.m4a"
+            mp4_path = type_dir / mp4_filename
+
+            if convert_audio_to_mp4(file_path, mp4_path):
+                # Conversion successful - use the MP4 file
+                file_path.unlink()  # Delete original WebM
+                final_file_path = mp4_path
+                final_filename = mp4_filename
+                final_mime_type = "audio/mp4"
+                file_size = mp4_path.stat().st_size
+                logger.info(f"✅ Audio converted: {file_extension} -> .m4a ({file_size} bytes)")
+            else:
+                # Conversion failed - keep original file but warn
+                logger.warning(f"⚠️  Audio conversion failed, keeping original {file_extension}")
+
         # Generate URL (relative path for now)
-        file_url = f"https://roamifly-admin-b97e90c67026.herokuapp.com/uploads/{attachment_type}/{unique_filename}"
-        storage_path = str(file_path)
+        file_url = f"https://roamifly-admin-b97e90c67026.herokuapp.com/uploads/{attachment_type}/{final_filename}"
+        storage_path = str(final_file_path)
 
         logger.info(f"✅ Uploaded {attachment_type}: {file.filename} ({file_size} bytes) -> {file_url}")
 
@@ -114,7 +180,7 @@ async def upload_attachment(
             file_url=file_url,
             file_name=file.filename,
             file_size=file_size,
-            mime_type=mime_type,
+            mime_type=final_mime_type,
             storage_path=storage_path,
         )
 

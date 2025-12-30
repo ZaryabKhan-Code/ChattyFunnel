@@ -284,7 +284,30 @@ export default function Messages() {
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+
+      // Try different MIME types in order of Facebook compatibility
+      // MP4/M4A is best for Facebook, then WebM with opus codec
+      const mimeTypes = [
+        { mime: 'audio/mp4', ext: '.m4a' },
+        { mime: 'audio/aac', ext: '.aac' },
+        { mime: 'audio/webm;codecs=opus', ext: '.webm' },
+        { mime: 'audio/webm', ext: '.webm' },
+        { mime: 'audio/ogg;codecs=opus', ext: '.ogg' },
+      ]
+
+      let selectedMimeType = 'audio/webm'
+      let fileExtension = '.webm'
+
+      for (const { mime, ext } of mimeTypes) {
+        if (MediaRecorder.isTypeSupported(mime)) {
+          selectedMimeType = mime
+          fileExtension = ext
+          console.log(`🎤 Using audio format: ${mime}`)
+          break
+        }
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: selectedMimeType })
 
       audioChunksRef.current = []
 
@@ -295,8 +318,9 @@ export default function Messages() {
       }
 
       mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
-        const audioFile = new File([audioBlob], `voice_note_${Date.now()}.webm`, { type: 'audio/webm' })
+        const baseMimeType = selectedMimeType.split(';')[0] // Remove codec info
+        const audioBlob = new Blob(audioChunksRef.current, { type: baseMimeType })
+        const audioFile = new File([audioBlob], `voice_note_${Date.now()}${fileExtension}`, { type: baseMimeType })
         const url = URL.createObjectURL(audioBlob)
 
         setAttachment({ file: audioFile, url, type: 'audio' })
