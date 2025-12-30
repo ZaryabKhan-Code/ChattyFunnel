@@ -109,12 +109,12 @@ export default function Messages() {
   }
 
   const handleSendMessage = async () => {
-    if (!messageInput.trim() || !selectedConversation || !userId) return
+    if (!messageInput.trim() || !selectedConversation || !workspaceId) return
 
     try {
-      await axios.post(`${API_URL}/messages/send`, {
+      await axios.post(`${API_URL}/messages/messages/send`, {
         conversation_id: selectedConversation,
-        user_id: userId,
+        workspace_id: workspaceId,
         message_text: messageInput
       })
 

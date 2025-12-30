@@ -110,7 +110,7 @@ export default function FunnelsPage() {
 
   const handleAssignToFunnel = async (conversationId: string, funnelId: number | null) => {
     try {
-      await axios.post(`${API_URL}/messages/conversations/${conversationId}/funnel`, {
+      await axios.post(`${API_URL}/messages/conversations/${conversationId}/move-funnel`, {
         funnel_id: funnelId
       })
 
