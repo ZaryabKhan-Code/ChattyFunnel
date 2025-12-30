@@ -202,31 +202,48 @@ class FacebookService:
         return all_pages
 
     async def get_page_conversations(
-        self, page_id: str, page_access_token: str
+        self, page_id: str, page_access_token: str, max_pages: int = 5
     ) -> List[Dict[str, Any]]:
-        """Get conversations for a page"""
-        async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{self.graph_url}/{page_id}/conversations",
-                params={
-                    "access_token": page_access_token,
-                    "fields": "id,participants,updated_time",
-                },
-            )
-            response.raise_for_status()
-            data = response.json()
-            return data.get("data", [])
+        """Get conversations for a page with pagination support"""
+        all_conversations = []
+        url = f"{self.graph_url}/{page_id}/conversations"
+        params = {
+            "access_token": page_access_token,
+            "fields": "id,participants,updated_time",
+            "limit": 50,  # Request more per page
+        }
+
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            pages_fetched = 0
+            while url and pages_fetched < max_pages:
+                response = await client.get(url, params=params if pages_fetched == 0 else None)
+                response.raise_for_status()
+                data = response.json()
+
+                conversations = data.get("data", [])
+                all_conversations.extend(conversations)
+                pages_fetched += 1
+
+                # Get next page URL if available
+                paging = data.get("paging", {})
+                url = paging.get("next")
+
+                if url:
+                    params = None  # Next URL includes all params
+
+        return all_conversations
 
     async def get_conversation_messages(
         self, conversation_id: str, page_access_token: str
     ) -> List[Dict[str, Any]]:
         """Get messages from a conversation"""
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.get(
                 f"{self.graph_url}/{conversation_id}/messages",
                 params={
                     "access_token": page_access_token,
                     "fields": "id,from,to,message,created_time,attachments",
+                    "limit": 50,
                 },
             )
             response.raise_for_status()

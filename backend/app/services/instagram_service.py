@@ -257,10 +257,10 @@ class InstagramService:
             return None
 
     async def get_conversations(
-        self, page_id: str, access_token: str
+        self, page_id: str, access_token: str, max_pages: int = 5
     ) -> List[Dict[str, Any]]:
         """
-        Get Instagram Direct message conversations.
+        Get Instagram Direct message conversations with pagination support.
 
         For Instagram Business Login: page_id is the Instagram Account ID
         For Facebook Page-managed: page_id is the Facebook Page ID
@@ -272,40 +272,52 @@ class InstagramService:
         import logging
         logger = logging.getLogger(__name__)
 
-        async with httpx.AsyncClient() as client:
-            # Detect token type and use appropriate endpoint
-            if access_token.startswith("IGAAL"):
-                # Instagram Business Login token - use graph.instagram.com
-                base_url = "https://graph.instagram.com"
-                logger.info("🔑 Using Instagram Business Login endpoint")
-            else:
-                # Facebook token - use graph.facebook.com with version
-                base_url = self.graph_url
-                logger.info("🔑 Using Facebook Graph API endpoint")
+        all_conversations = []
 
-            url = f"{base_url}/{page_id}/conversations"
-            params = {
-                "access_token": access_token,
-                "fields": "id,participants,updated_time",
-                "platform": "instagram",  # Filter to only Instagram conversations
-            }
+        # Detect token type and use appropriate endpoint
+        if access_token.startswith("IGAAL"):
+            base_url = "https://graph.instagram.com"
+            logger.info("🔑 Using Instagram Business Login endpoint")
+        else:
+            base_url = self.graph_url
+            logger.info("🔑 Using Facebook Graph API endpoint")
 
-            logger.info(f"📞 Instagram API Request: GET {url}")
-            logger.info(f"📞 Parameters: fields={params['fields']}, platform={params['platform']}")
+        url = f"{base_url}/{page_id}/conversations"
+        params = {
+            "access_token": access_token,
+            "fields": "id,participants,updated_time",
+            "platform": "instagram",
+            "limit": 50,
+        }
 
-            response = await client.get(url, params=params)
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            pages_fetched = 0
+            while url and pages_fetched < max_pages:
+                logger.info(f"📞 Instagram API Request: GET {url}")
 
-            logger.info(f"📞 Instagram API Response Status: {response.status_code}")
+                response = await client.get(url, params=params if pages_fetched == 0 else None)
+                logger.info(f"📞 Instagram API Response Status: {response.status_code}")
 
-            # Log the response body even if there's an error
-            try:
-                response_data = response.json()
-                logger.info(f"📞 Instagram API Response Body: {response_data}")
-            except:
-                logger.info(f"📞 Instagram API Response Text: {response.text}")
+                try:
+                    response_data = response.json()
+                    logger.info(f"📞 Instagram API Response Body: {response_data}")
+                except:
+                    logger.info(f"📞 Instagram API Response Text: {response.text}")
 
-            response.raise_for_status()
-            return response_data.get("data", [])
+                response.raise_for_status()
+
+                conversations = response_data.get("data", [])
+                all_conversations.extend(conversations)
+                pages_fetched += 1
+
+                # Get next page URL if available
+                paging = response_data.get("paging", {})
+                url = paging.get("next")
+
+                if url:
+                    params = None  # Next URL includes all params
+
+        return all_conversations
 
     async def get_conversation_messages(
         self, conversation_id: str, access_token: str
@@ -317,7 +329,7 @@ class InstagramService:
         - IGAAL* tokens -> graph.instagram.com
         - EAA* tokens -> graph.facebook.com
         """
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             # Detect token type and use appropriate endpoint
             if access_token.startswith("IGAAL"):
                 base_url = "https://graph.instagram.com"
@@ -329,6 +341,7 @@ class InstagramService:
                 params={
                     "access_token": access_token,
                     "fields": "id,from,to,message,created_time,attachments",
+                    "limit": 50,
                 },
             )
             response.raise_for_status()
