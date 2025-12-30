@@ -670,9 +670,20 @@ async def get_conversations(
 ):
     """Get all conversations for a workspace"""
     try:
-        # Get all participants for this workspace
+        # First, get active platforms for this workspace
+        # Only show conversations from platforms that have ACTIVE accounts
+        active_platforms = db.query(ConnectedAccount.platform).filter(
+            ConnectedAccount.workspace_id == workspace_id,
+            ConnectedAccount.is_active == True,
+        ).distinct().all()
+        active_platform_list = [p[0] for p in active_platforms]
+
+        logger.info(f"Active platforms for workspace {workspace_id}: {active_platform_list}")
+
+        # Get all participants for this workspace, but only for active platforms
         participants = db.query(ConversationParticipant).filter(
-            ConversationParticipant.workspace_id == workspace_id
+            ConversationParticipant.workspace_id == workspace_id,
+            ConversationParticipant.platform.in_(active_platform_list)
         ).all()
 
         conversations = []
