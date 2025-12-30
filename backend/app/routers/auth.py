@@ -144,21 +144,43 @@ async def facebook_callback(
         for page in pages:
             logger.info(f"Processing page: {page.get('name')}, ID: {page.get('id')}")
 
-            # Check if this Facebook page is already connected to ANY workspace
-            # This prevents the same social account from being used in multiple workspaces
-            existing_workspace_account = (
+            # IMPORTANT: One Facebook per workspace rule
+            # Check if there's already a Facebook page connected to this workspace
+            existing_workspace_facebook = (
+                db.query(ConnectedAccount)
+                .filter(
+                    ConnectedAccount.platform == "facebook",
+                    ConnectedAccount.workspace_id == workspace_id,
+                    ConnectedAccount.is_active == True,
+                )
+                .first()
+            )
+
+            if existing_workspace_facebook:
+                if existing_workspace_facebook.page_id == page["id"]:
+                    # Same Facebook page - update it
+                    logger.info(f"Updating existing Facebook page {page['name']} in workspace {workspace_id}")
+                else:
+                    # Different Facebook page - skip (one Facebook per workspace)
+                    logger.warning(f"Workspace {workspace_id} already has Facebook page {existing_workspace_facebook.page_name}")
+                    logger.warning(f"Skipping Facebook page {page['name']} (one Facebook per workspace)")
+                    continue
+
+            # Check if this Facebook page is already connected to ANOTHER workspace
+            existing_other_workspace = (
                 db.query(ConnectedAccount)
                 .filter(
                     ConnectedAccount.platform == "facebook",
                     ConnectedAccount.page_id == page["id"],
                     ConnectedAccount.is_active == True,
                     ConnectedAccount.workspace_id.isnot(None),
+                    ConnectedAccount.workspace_id != workspace_id,
                 )
                 .first()
             )
 
-            if existing_workspace_account and existing_workspace_account.workspace_id != workspace_id:
-                logger.warning(f"Facebook page {page['name']} is already connected to workspace {existing_workspace_account.workspace_id}")
+            if existing_other_workspace:
+                logger.warning(f"Facebook page {page['name']} is already connected to workspace {existing_other_workspace.workspace_id}")
                 continue  # Skip this page, it's already connected to another workspace
 
             # Check if account already exists for this user
@@ -225,23 +247,51 @@ async def facebook_callback(
 
                     logger.info(f"Found Instagram account: {ig_username} (ID: {ig_account_id})")
 
-                    # Check if this Instagram account is already connected to ANY workspace
-                    existing_workspace_ig = (
+                    # IMPORTANT: One Instagram per workspace rule
+                    # Check if there's ANY Instagram account already in this workspace
+                    existing_workspace_instagram = (
+                        db.query(ConnectedAccount)
+                        .filter(
+                            ConnectedAccount.platform == "instagram",
+                            ConnectedAccount.workspace_id == workspace_id,
+                            ConnectedAccount.is_active == True,
+                        )
+                        .first()
+                    )
+
+                    if existing_workspace_instagram:
+                        # Already have Instagram in this workspace
+                        if existing_workspace_instagram.platform_username == ig_username:
+                            # Same Instagram account - update with Facebook Page info for better API access
+                            logger.info(f"Updating existing Instagram account @{ig_username} with Facebook Page info")
+                            # Store the Facebook Page ID for fallback API calls
+                            # Keep existing connection_type as it determines the primary API
+                            existing_workspace_instagram.updated_at = datetime.utcnow()
+                            logger.info(f"Instagram account @{ig_username} already connected via {existing_workspace_instagram.connection_type}")
+                        else:
+                            # Different Instagram account - skip (one Instagram per workspace)
+                            logger.warning(f"Workspace {workspace_id} already has Instagram @{existing_workspace_instagram.platform_username}")
+                            logger.warning(f"Skipping Facebook page-linked Instagram @{ig_username} (one Instagram per workspace)")
+                        continue  # Skip to next page
+
+                    # Check if this Instagram account is already connected to ANOTHER workspace
+                    existing_other_workspace_ig = (
                         db.query(ConnectedAccount)
                         .filter(
                             ConnectedAccount.platform == "instagram",
                             ConnectedAccount.platform_user_id == ig_account_id,
                             ConnectedAccount.is_active == True,
                             ConnectedAccount.workspace_id.isnot(None),
+                            ConnectedAccount.workspace_id != workspace_id,
                         )
                         .first()
                     )
 
-                    if existing_workspace_ig and existing_workspace_ig.workspace_id != workspace_id:
-                        logger.warning(f"Instagram account {ig_username} is already connected to workspace {existing_workspace_ig.workspace_id}")
+                    if existing_other_workspace_ig:
+                        logger.warning(f"Instagram account {ig_username} is already connected to workspace {existing_other_workspace_ig.workspace_id}")
                         continue  # Skip this Instagram account
 
-                    # Check if Instagram account already exists for this user
+                    # Check if Instagram account already exists for this user (by exact platform_user_id)
                     existing_ig_account = (
                         db.query(ConnectedAccount)
                         .filter(
@@ -258,6 +308,7 @@ async def facebook_callback(
                         existing_ig_account.platform_username = ig_username
                         existing_ig_account.page_id = page["id"]
                         existing_ig_account.connection_type = "facebook_page"
+                        existing_ig_account.workspace_id = workspace_id
                         existing_ig_account.token_expires_at = datetime.utcnow() + timedelta(
                             seconds=expires_in
                         )
@@ -411,20 +462,52 @@ async def instagram_callback(
 
             access_token = ig_account.get("page_access_token", long_lived_token)
 
-            # Check if this Instagram account is already connected to ANY workspace
-            existing_workspace_account = (
+            # IMPORTANT: One Instagram per workspace rule
+            # Check if there's already an Instagram account in this workspace
+            existing_workspace_instagram = (
+                db.query(ConnectedAccount)
+                .filter(
+                    ConnectedAccount.platform == "instagram",
+                    ConnectedAccount.workspace_id == workspace_id,
+                    ConnectedAccount.is_active == True,
+                )
+                .first()
+            )
+
+            if existing_workspace_instagram:
+                if existing_workspace_instagram.platform_username == ig_account.get("username"):
+                    # Same Instagram account - update it with new Instagram Business Login credentials
+                    logger.info(f"Updating existing Instagram account @{ig_account.get('username')} with Instagram Business Login")
+                    existing_workspace_instagram.access_token = access_token
+                    existing_workspace_instagram.platform_user_id = instagram_account_id
+                    existing_workspace_instagram.page_id = instagram_scoped_user_id
+                    existing_workspace_instagram.connection_type = "instagram_business_login"
+                    existing_workspace_instagram.token_expires_at = datetime.utcnow() + timedelta(seconds=expires_in)
+                    existing_workspace_instagram.is_active = True
+                    existing_workspace_instagram.updated_at = datetime.utcnow()
+                    logger.info(f"Instagram account @{ig_account.get('username')} updated successfully")
+                    continue  # Already updated, skip to next account
+                else:
+                    # Different Instagram account - skip (one Instagram per workspace)
+                    logger.warning(f"Workspace {workspace_id} already has Instagram @{existing_workspace_instagram.platform_username}")
+                    logger.warning(f"Skipping Instagram @{ig_account.get('username')} (one Instagram per workspace)")
+                    continue
+
+            # Check if this Instagram account is already connected to ANOTHER workspace
+            existing_other_workspace = (
                 db.query(ConnectedAccount)
                 .filter(
                     ConnectedAccount.platform == "instagram",
                     ConnectedAccount.platform_user_id == instagram_account_id,
                     ConnectedAccount.is_active == True,
                     ConnectedAccount.workspace_id.isnot(None),
+                    ConnectedAccount.workspace_id != workspace_id,
                 )
                 .first()
             )
 
-            if existing_workspace_account and existing_workspace_account.workspace_id != workspace_id:
-                logger.warning(f"Instagram account @{ig_account.get('username')} is already connected to workspace {existing_workspace_account.workspace_id}")
+            if existing_other_workspace:
+                logger.warning(f"Instagram account @{ig_account.get('username')} is already connected to workspace {existing_other_workspace.workspace_id}")
                 continue  # Skip this Instagram account
 
             # Check if account already exists for this user (check by Instagram Account ID)
