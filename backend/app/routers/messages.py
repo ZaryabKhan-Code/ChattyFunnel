@@ -122,8 +122,9 @@ async def fetch_sender_info(sender_id: str, access_token: str, platform: str) ->
     except Exception as e:
         logger.error(f"👤 Failed to fetch sender info for {sender_id}: {e}", exc_info=True)
 
-    # Return default values if fetch fails
-    return {"name": "User", "username": sender_id, "profile_pic": None}
+    # Return None values if fetch fails - caller should use fallback data
+    # Don't use sender_id as username - it's confusing to users
+    return {"name": None, "username": None, "profile_pic": None}
 
 
 @router.post("/send", response_model=MessageResponse)
@@ -455,6 +456,13 @@ async def sync_account_messages(db: Session, account: ConnectedAccount, max_conv
             logger.info(f"🔄 Syncing {len(conversations)} Instagram conversations (limited from total)")
 
             for conv in conversations:
+                # Extract participant usernames from conversation data for fallback
+                # Instagram conversation includes: {'participants': {'data': [{'username': 'user1', 'id': '123'}, ...]}}
+                conv_participants = {}
+                if conv.get("participants") and conv["participants"].get("data"):
+                    for p in conv["participants"]["data"]:
+                        conv_participants[p["id"]] = p.get("username")
+
                 # Get messages for each conversation
                 messages = await ig_service.get_conversation_messages(
                     conv["id"], account.access_token
@@ -509,13 +517,22 @@ async def sync_account_messages(db: Session, account: ConnectedAccount, max_conv
                             # Fetch sender info
                             sender_info = await fetch_sender_info(sender_id, account.access_token, "instagram")
 
+                            # Use conversation participant username as fallback if fetch_sender_info failed
+                            # This is needed for Instagram Business Login where fetching other user info fails
+                            if not sender_info.get("username") and sender_id in conv_participants:
+                                fallback_username = conv_participants[sender_id]
+                                if fallback_username:
+                                    sender_info["username"] = fallback_username
+                                    sender_info["name"] = fallback_username  # Use username as name too
+                                    logger.info(f"👤 Using conversation participant username: @{fallback_username}")
+
                             if not participant:
                                 participant = ConversationParticipant(
                                     conversation_id=conv_id,
                                     platform="instagram",
                                     platform_conversation_id=sender_id,
                                     participant_id=sender_id,
-                                    participant_name=sender_info.get("name"),
+                                    participant_name=sender_info.get("name") or sender_info.get("username") or "Instagram User",
                                     participant_username=sender_info.get("username"),
                                     participant_profile_pic=sender_info.get("profile_pic"),
                                     user_id=user_id,
@@ -524,10 +541,13 @@ async def sync_account_messages(db: Session, account: ConnectedAccount, max_conv
                                 )
                                 db.add(participant)
                             else:
-                                # Update participant info
-                                participant.participant_name = sender_info.get("name")
-                                participant.participant_username = sender_info.get("username")
-                                participant.participant_profile_pic = sender_info.get("profile_pic")
+                                # Update participant info (only if we got valid info)
+                                if sender_info.get("name"):
+                                    participant.participant_name = sender_info.get("name")
+                                if sender_info.get("username"):
+                                    participant.participant_username = sender_info.get("username")
+                                if sender_info.get("profile_pic"):
+                                    participant.participant_profile_pic = sender_info.get("profile_pic")
                                 participant.last_message_at = datetime.utcnow()
 
                         # Parse attachments

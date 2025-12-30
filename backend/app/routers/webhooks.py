@@ -93,8 +93,9 @@ async def fetch_sender_info(sender_id: str, access_token: str, platform: str) ->
     except Exception as e:
         logger.error(f"👤 Failed to fetch sender info for {sender_id}: {e}", exc_info=True)
 
-    # Return default values if fetch fails
-    return {"name": "User", "username": sender_id, "profile_pic": None}
+    # Return None values if fetch fails - caller should use fallback data
+    # Don't use sender_id as username - it's confusing to users
+    return {"name": None, "username": None, "profile_pic": None}
 
 
 def parse_message_attachments(message: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -813,13 +814,15 @@ async def handle_instagram_message(event: Dict[str, Any], db: Session):
                 ).first()
 
                 if not participant:
+                    # Use reasonable defaults if fetch failed
+                    # The username will be updated when messages are synced (which has access to conversation participants)
                     participant = ConversationParticipant(
                         conversation_id=conv_id,
                         platform="instagram",
                         platform_conversation_id=user_ig_id,
                         participant_id=user_ig_id,
-                        participant_name=user_info.get("name"),
-                        participant_username=user_info.get("username"),
+                        participant_name=user_info.get("name") or "Instagram User",
+                        participant_username=user_info.get("username"),  # May be None, will be updated on sync
                         participant_profile_pic=user_info.get("profile_pic"),
                         user_id=account.user_id,
                         workspace_id=account.workspace_id,
